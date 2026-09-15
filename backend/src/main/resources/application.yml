@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: id-onboarding-platform
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:onboarding}
+    username: ${DB_USER:onboarding}
+    password: ${DB_PASSWORD:onboarding}
+  jpa:
+    hibernate:
+      ddl-auto: update   # fine for a dev/internship project; use migrations (Flyway) if you productionize later
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: 8080
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-this-to-a-long-random-string-before-any-real-use}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}   # 24h
+  ai-service:
+    base-url: ${AI_SERVICE_URL:http://localhost:8000}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

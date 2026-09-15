@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: onboarding
+      POSTGRES_USER: onboarding
+      POSTGRES_PASSWORD: onboarding
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onboarding"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ai-service:
+    build: ./ai-service
+    ports:
+      - "8000:8000"
+    # Reload the FastAPI service on code changes during local dev.
+    volumes:
+      - ./ai-service/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: onboarding
+      DB_USER: onboarding
+      DB_PASSWORD: onboarding
+      AI_SERVICE_URL: http://ai-service:8000
+      JWT_SECRET: dev-only-secret-change-before-any-real-use
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+
+  # Frontend is left out of Compose intentionally: run `npm start` locally during
+  # development for fast rebuilds. Add a Dockerfile + service here once you're
+  # ready to containerize it for a demo/deploy.
+
+volumes:
+  postgres_data:

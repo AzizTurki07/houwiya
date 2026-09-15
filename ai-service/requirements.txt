@@ -1,0 +1,17 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+pydantic==2.7.4
+
+# Passport MRZ pipeline (Phase 2)
+opencv-python-headless==5.0.0.93
+numpy==2.5.1
+Pillow==12.3.0
+PassportEye==2.2.2
+mrz==0.6.2
+
+# CIN region-based OCR pipeline (Phase 3)
+pytesseract==0.3.13
+
+# Testing
+pytest==9.1.1

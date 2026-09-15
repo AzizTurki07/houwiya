@@ -1,0 +1,42 @@
+name: AI Service CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ai-service/**'
+      - '.github/workflows/ai-service-ci.yml'
+  pull_request:
+    paths:
+      - 'ai-service/**'
+      - '.github/workflows/ai-service-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: ai-service/requirements.txt
+
+      # PassportEye and pytesseract both shell out to the tesseract binary --
+      # this is a system package, not something pip installs for you.
+      - name: Install Tesseract + language packs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-fra tesseract-ocr-ara libgl1
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
