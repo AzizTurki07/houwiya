@@ -6,6 +6,7 @@ on:
     paths:
       - 'ai-service/**'
       - '.github/workflows/ai-service-ci.yml'
+
   pull_request:
     paths:
       - 'ai-service/**'
@@ -14,6 +15,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: ai-service
@@ -28,8 +30,6 @@ jobs:
           cache: 'pip'
           cache-dependency-path: ai-service/requirements.txt
 
-      # PassportEye and pytesseract both shell out to the tesseract binary --
-      # this is a system package, not something pip installs for you.
       - name: Install Tesseract + language packs
         run: |
           sudo apt-get update
@@ -39,4 +39,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
+        env:
+          PYTHONPATH: .
         run: pytest tests/ -v
