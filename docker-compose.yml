@@ -26,15 +26,14 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "8080:8080"
+    network_mode: host
     environment:
-      DB_HOST: postgres
+      DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: onboarding
       DB_USER: onboarding
       DB_PASSWORD: onboarding
-      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_URL: http://localhost:8000
       JWT_SECRET: dev-only-secret-change-before-any-real-use
     depends_on:
       postgres:
