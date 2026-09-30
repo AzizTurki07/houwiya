@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import passport, cin
+from app.routers import passport, cin, face
 
 app = FastAPI(
     title="ID Onboarding AI Service",
@@ -10,6 +10,7 @@ app = FastAPI(
 
 app.include_router(passport.router)
 app.include_router(cin.router)
+app.include_router(face.router)
 
 
 @app.get("/health")

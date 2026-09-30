@@ -1,6 +1,6 @@
 import { Component, input } from '@angular/core';
 
-const STEPS = ['Consent', 'Photo', 'Review', 'Done'];
+const STEPS = ['Consent', 'Photo', 'Selfie', 'Review', 'Done'];
 
 @Component({
   selector: 'app-steps',

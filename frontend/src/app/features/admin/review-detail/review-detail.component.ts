@@ -17,6 +17,9 @@ interface FieldRow {
   confidence: { level: ConfidenceLevel; pct: number } | null;
 }
 
+const PHOTO_ORDER: DocumentSide[] = ['FRONT', 'BACK', 'SELFIE'];
+const PHOTO_CAPTION: Record<DocumentSide, string> = { FRONT: 'Front', BACK: 'Back', SELFIE: 'Selfie (live)' };
+
 @Component({
   selector: 'app-review-detail',
   standalone: true,
@@ -38,6 +41,7 @@ export class ReviewDetailComponent implements OnInit, OnDestroy {
 
   readonly documentLabel = DOCUMENT_LABEL;
   readonly warningText = WARNING_ADMIN_TEXT;
+  readonly photoCaption = PHOTO_CAPTION;
 
   readonly rows = computed<FieldRow[]>(() => {
     const d = this.detail();
@@ -98,7 +102,7 @@ export class ReviewDetailComponent implements OnInit, OnDestroy {
     for (const side of [...d.imageSides].sort()) {
       this.admin.image(this.documentId, side).subscribe({
         next: (blob) => this.photos.update((p) => [...p, { side, url: URL.createObjectURL(blob) }]
-          .sort((a, b) => (a.side === 'FRONT' ? -1 : b.side === 'FRONT' ? 1 : 0))),
+          .sort((a, b) => PHOTO_ORDER.indexOf(a.side) - PHOTO_ORDER.indexOf(b.side))),
         error: () => undefined
       });
     }

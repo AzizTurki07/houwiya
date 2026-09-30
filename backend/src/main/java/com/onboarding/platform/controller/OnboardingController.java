@@ -84,6 +84,14 @@ public class OnboardingController {
         return ResponseEntity.ok(documentService.uploadDocument(id, user, documentType, side, file));
     }
 
+    /** Three selfie frames (straight, turned one way, turned the other) for the face match. */
+    @PostMapping(value = "/{id}/selfie", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<DocumentResponse> submitSelfie(@PathVariable UUID id,
+                                                         @RequestParam("frames") List<MultipartFile> frames) {
+        User user = currentUserProvider.getCurrentUser();
+        return ResponseEntity.ok(documentService.submitSelfie(id, user, frames));
+    }
+
     @GetMapping("/{id}/document")
     public ResponseEntity<DocumentResponse> getDocument(@PathVariable UUID id) {
         User user = currentUserProvider.getCurrentUser();

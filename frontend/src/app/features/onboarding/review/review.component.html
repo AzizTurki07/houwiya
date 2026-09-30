@@ -1,5 +1,5 @@
 <main class="page">
-  <app-steps [current]="3" />
+  <app-steps [current]="4" />
 
   @if (document(); as doc) {
     <h1>Check your details</h1>
@@ -89,6 +89,9 @@
           <a class="btn" [routerLink]="['/onboarding', sessionId, 'capture-back']">Retake back</a>
         } @else {
           <a class="btn" [routerLink]="['/onboarding', sessionId, 'capture']" [queryParams]="{ type: doc.documentType }">Retake photo</a>
+        }
+        @if (doc.selfieCaptured) {
+          <a class="btn" [routerLink]="['/onboarding', sessionId, 'selfie']">Retake selfie</a>
         }
         <button class="btn primary" type="submit" [disabled]="submitting()">
           {{ submitting() ? 'Submitting…' : 'Confirm and submit' }}

@@ -27,6 +27,12 @@ public record ReviewDetail(
         Boolean checksumValid,
         LocalDate expiryDate,
         List<DocumentWarning> warnings,
+        /** Face check: similarity of the selfie to the document portrait (null if not run / no face). */
+        Double faceSimilarity,
+        Double faceThreshold,
+        Boolean faceMatched,
+        Boolean livenessPassed,
+        String livenessReason,
         /** Which photos are still stored (they are deleted once a decision is made). */
         List<DocumentSide> imageSides,
         Instant submittedAt,

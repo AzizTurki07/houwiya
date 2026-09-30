@@ -14,6 +14,7 @@ import com.onboarding.platform.exception.ResourceNotFoundException;
 import com.onboarding.platform.repository.ExtractedDocumentRepository;
 import com.onboarding.platform.repository.OnboardingSessionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,9 @@ public class AdminReviewService {
     private final DocumentImageService imageService;
     private final NotificationService notificationService;
     private final AuditService auditService;
+
+    @Value("${app.face.match-threshold:0.45}")
+    private double faceThreshold;
 
     @Transactional(readOnly = true)
     public List<ReviewQueueItem> queue(ReviewStatus status) {
@@ -121,6 +125,11 @@ public class AdminReviewService {
                 doc.getChecksumValid(),
                 doc.getExpiryDate(),
                 documentService.warningsFor(doc),
+                doc.getFaceSimilarity(),
+                faceThreshold,
+                doc.getFaceMatched(),
+                doc.getLivenessPassed(),
+                doc.getLivenessReason(),
                 imageService.availableSides(doc.getId()),
                 doc.getConfirmedAt(),
                 doc.getReviewedBy(),

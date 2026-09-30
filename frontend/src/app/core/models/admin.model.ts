@@ -30,6 +30,12 @@ export interface ReviewDetail {
   checksumValid: boolean | null;
   expiryDate: string | null;
   warnings: DocumentWarning[];
+  /** Selfie vs document portrait (cosine similarity); null if not run or no face found. */
+  faceSimilarity: number | null;
+  faceThreshold: number;
+  faceMatched: boolean | null;
+  livenessPassed: boolean | null;
+  livenessReason: string | null;
   /** Photos still stored -- they are deleted once a decision is made. */
   imageSides: DocumentSide[];
   submittedAt: string;

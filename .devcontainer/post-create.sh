@@ -10,6 +10,13 @@ echo "==> AI service Python deps"
 python -m pip install --upgrade pip
 python -m pip install -r ai-service/requirements.txt
 
+echo "==> Face match models (only needed when running the AI service outside Docker)"
+for model in face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx \
+             face_recognition_sface/resolve/main/face_recognition_sface_2021dec.onnx; do
+  target="ai-service/models/$(basename "$model")"
+  [ -f "$target" ] || curl -fsSL -o "$target" "https://huggingface.co/opencv/$model" || echo "   (download failed: $target)"
+done
+
 echo "==> Frontend deps"
 (cd frontend && npm ci)
 

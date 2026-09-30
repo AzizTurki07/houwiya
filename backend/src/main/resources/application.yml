@@ -51,6 +51,11 @@ app:
   review:
     # Below this OCR confidence, a document can't be auto-approved and goes to the admin queue.
     min-confidence: ${REVIEW_MIN_CONFIDENCE:0.7}
+  face:
+    # Selfie + face match is part of the flow (confirm needs it). Must match the AI service's
+    # MATCH_THRESHOLD, which is only used here for display to reviewers.
+    required: ${FACE_MATCH_REQUIRED:true}
+    match-threshold: 0.45
   crypto:
     # AES-256 key (base64, 32 bytes) for personal data at rest. The default is a PUBLIC dev key
     # (it's in this file): set APP_ENCRYPTION_KEY to your own for anything beyond local dev,

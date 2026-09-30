@@ -54,6 +54,13 @@ export class OnboardingService {
     });
   }
 
+  /** Three frames: looking straight, head turned one way, then the other. */
+  submitSelfie(id: string, frames: Blob[]): Observable<DocumentResponse> {
+    const form = new FormData();
+    frames.forEach((frame, i) => form.append('frames', frame, `selfie-${i}.jpg`));
+    return this.http.post<DocumentResponse>(`${this.base}/${id}/selfie`, form);
+  }
+
   getDocument(id: string): Observable<DocumentResponse> {
     return this.http.get<DocumentResponse>(`${this.base}/${id}/document`);
   }

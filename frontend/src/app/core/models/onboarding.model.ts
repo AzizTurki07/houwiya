@@ -2,8 +2,8 @@
 
 export type DocumentType = 'PASSPORT' | 'CIN';
 
-/** The CIN needs both; a passport only has a front (the photo page). */
-export type DocumentSide = 'FRONT' | 'BACK';
+/** The CIN needs both; a passport only has a front (the photo page). SELFIE: stored for reviewers. */
+export type DocumentSide = 'FRONT' | 'BACK' | 'SELFIE';
 
 export type SessionStatus =
   | 'STARTED'
@@ -20,7 +20,10 @@ export type DocumentWarning =
   | 'CHECKSUM_FAILED'
   | 'MISSING_REQUIRED_FIELDS'
   | 'DOCUMENT_EXPIRED'
-  | 'USER_CORRECTED';
+  | 'USER_CORRECTED'
+  | 'FACE_MISMATCH'
+  | 'FACE_NOT_VERIFIED'
+  | 'LIVENESS_FAILED';
 
 export interface SessionResponse {
   id: string;
@@ -48,6 +51,12 @@ export interface DocumentResponse {
   /** CIN: address/profession/issue date are on the back, a second photo. */
   backSideRequired: boolean;
   backSideCaptured: boolean;
+  /** The selfie step: needed before confirming (unless switched off on the server). */
+  selfieRequired: boolean;
+  selfieCaptured: boolean;
+  /** Outcome only -- the similarity score is for reviewers. null: not checked / no face found. */
+  faceMatched: boolean | null;
+  livenessPassed: boolean | null;
   warnings: DocumentWarning[];
   reviewStatus: ReviewStatus;
   /** Why an admin rejected it; only set when rejected. */

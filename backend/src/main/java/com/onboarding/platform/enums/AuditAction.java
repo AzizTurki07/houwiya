@@ -9,6 +9,7 @@ public enum AuditAction {
     CONSENT_GIVEN,
     DOCUMENT_UPLOADED,
     DOCUMENT_CONFIRMED,
+    SELFIE_CHECKED,
     SESSION_DELETED,
     REVIEW_OPENED,          // an admin viewed a document's personal data
     REVIEW_IMAGE_VIEWED,    // an admin viewed a document photo

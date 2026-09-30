@@ -48,6 +48,10 @@ import java.util.UUID;
  *
  * A CIN is two photos: the front creates the document, the back (address, profession, issue
  * date) is merged into it, and the document can't be confirmed until both are in.
+ *
+ * Then a selfie (three frames: straight, turned one way, turned the other) is compared with the
+ * portrait on the document photo, with a head-turn liveness check. Any doubt there is a
+ * warning, i.e. a human reviewer -- never an automatic rejection.
  */
 @Service
 public class DocumentService {
@@ -67,6 +71,7 @@ public class DocumentService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final double minConfidence;
+    private final boolean selfieRequired;
 
     public DocumentService(OnboardingService onboardingService,
                            OnboardingSessionRepository sessionRepository,
@@ -77,7 +82,8 @@ public class DocumentService {
                            FieldEncryptor encryptor,
                            ObjectMapper objectMapper,
                            TransactionTemplate transactionTemplate,
-                           @Value("${app.review.min-confidence:0.7}") double minConfidence) {
+                           @Value("${app.review.min-confidence:0.7}") double minConfidence,
+                           @Value("${app.face.required:true}") boolean selfieRequired) {
         this.onboardingService = onboardingService;
         this.sessionRepository = sessionRepository;
         this.documentRepository = documentRepository;
@@ -88,6 +94,7 @@ public class DocumentService {
         this.objectMapper = objectMapper;
         this.transactionTemplate = transactionTemplate;
         this.minConfidence = minConfidence;
+        this.selfieRequired = selfieRequired;
     }
 
     public DocumentResponse uploadDocument(UUID sessionId, User user, DocumentType type, DocumentSide side,
@@ -95,6 +102,9 @@ public class DocumentService {
         OnboardingSession session = onboardingService.getOwnedSession(sessionId, user);
         requireUploadAllowed(session);
         validateImage(file);
+        if (side == DocumentSide.SELFIE) {
+            throw new IllegalArgumentException("Selfies are submitted to /selfie, not as a document side");
+        }
         if (side == DocumentSide.BACK) {
             requireFrontForBack(session, type);
         }
@@ -150,6 +160,8 @@ public class DocumentService {
         } else {
             existing.ifPresent(previous -> imageService.deleteSide(previous.getId(), DocumentSide.BACK));
         }
+        // A new front means a new portrait: any earlier face check no longer applies.
+        existing.ifPresent(previous -> imageService.deleteSide(previous.getId(), DocumentSide.SELFIE));
         refreshOverallConfidence(fields);
 
         ExtractedDocument document = existing.orElseGet(() -> ExtractedDocument.builder().session(session).build());
@@ -160,6 +172,11 @@ public class DocumentService {
         document.setChecksumValid(fields.hasNonNull("checksum_valid") ? fields.get("checksum_valid").asBoolean() : null);
         document.setBackSideCaptured(keepBack);
         document.setUserCorrected(false);
+        document.setFaceSimilarity(null);
+        document.setFaceMatched(null);
+        document.setLivenessPassed(null);
+        document.setLivenessReason(null);
+        document.setSelfieCheckedAt(null);
         applyKeyFields(document, fields, false);
         return document;
     }
@@ -182,6 +199,49 @@ public class DocumentService {
         return document;
     }
 
+    /**
+     * Compares the selfie with the portrait on the stored front photo (AI service) and records
+     * the outcome. frames[0] looks straight at the camera; the others turn the head. Can be
+     * retaken until the document is confirmed. Only the frontal frame is kept (encrypted, for
+     * the reviewer, under the same retention rules as the document photos).
+     */
+    public DocumentResponse submitSelfie(UUID sessionId, User user, List<MultipartFile> frames) {
+        OnboardingSession session = onboardingService.getOwnedSession(sessionId, user);
+        ExtractedDocument document = findDocument(session);
+        if (document.getConfirmedAt() != null) {
+            throw new InvalidSessionStateException("This document has already been confirmed");
+        }
+        if (frames == null || frames.size() != 3) {
+            throw new IllegalArgumentException("Exactly three selfie frames are required");
+        }
+        frames.forEach(DocumentService::validateImage);
+        DocumentImageService.Image front = imageService.load(document.getId(), DocumentSide.FRONT)
+                .orElseThrow(() -> new InvalidSessionStateException("Photograph your document before the selfie"));
+        List<byte[]> frameBytes = frames.stream().map(DocumentService::readBytes).toList();
+
+        // Outside any transaction, like the OCR call.
+        JsonNode result = aiServiceClient.verifyFace(front.bytes(), front.contentType(), frameBytes);
+        if (result == null || !result.isObject()) {
+            throw new IllegalStateException("AI service returned an empty face verification result");
+        }
+
+        return transactionTemplate.execute(status -> {
+            ExtractedDocument doc = findDocument(session);
+            doc.setFaceSimilarity(result.hasNonNull("similarity") ? result.get("similarity").asDouble() : null);
+            doc.setFaceMatched(result.hasNonNull("match") ? result.get("match").asBoolean() : null);
+            doc.setLivenessPassed(result.path("liveness_passed").asBoolean(false));
+            String reason = result.hasNonNull("liveness_reason") ? result.get("liveness_reason").asText() : null;
+            doc.setLivenessReason(reason == null || reason.length() <= 200 ? reason : reason.substring(0, 200));
+            doc.setSelfieCheckedAt(Instant.now());
+            doc.setReviewStatus(warningsFor(doc).isEmpty() ? ReviewStatus.PENDING : ReviewStatus.NEEDS_REVIEW);
+            documentRepository.save(doc);
+            imageService.store(doc.getId(), DocumentSide.SELFIE, frames.get(0).getContentType(), frameBytes.get(0));
+            auditService.record(AuditAction.SELFIE_CHECKED, "DOCUMENT", doc.getId(),
+                    "match=" + doc.getFaceMatched() + ", liveness=" + doc.getLivenessPassed());
+            return toResponse(doc, session);
+        });
+    }
+
     public DocumentResponse getDocument(UUID sessionId, User user) {
         OnboardingSession session = onboardingService.getOwnedSession(sessionId, user);
         return toResponse(findDocument(session), session);
@@ -197,6 +257,9 @@ public class DocumentService {
             }
             if (backSideRequired(document) && !document.isBackSideCaptured()) {
                 throw new InvalidSessionStateException("Photograph the back of your ID card before confirming");
+            }
+            if (selfieRequired && document.getSelfieCheckedAt() == null) {
+                throw new InvalidSessionStateException("Take your selfie before confirming");
             }
 
             ObjectNode stored = readFields(document);
@@ -283,6 +346,16 @@ public class DocumentService {
         if (document.isUserCorrected()) {
             warnings.add(DocumentWarning.USER_CORRECTED);
         }
+        if (document.getSelfieCheckedAt() != null) {
+            if (document.getFaceMatched() == null) {
+                warnings.add(DocumentWarning.FACE_NOT_VERIFIED);
+            } else if (!document.getFaceMatched()) {
+                warnings.add(DocumentWarning.FACE_MISMATCH);
+            }
+            if (!Boolean.TRUE.equals(document.getLivenessPassed())) {
+                warnings.add(DocumentWarning.LIVENESS_FAILED);
+            }
+        }
         return warnings;
     }
 
@@ -320,6 +393,10 @@ public class DocumentService {
                 document.isUserCorrected(),
                 backSideRequired(document),
                 document.isBackSideCaptured(),
+                selfieRequired,
+                document.getSelfieCheckedAt() != null,
+                document.getFaceMatched(),
+                document.getLivenessPassed(),
                 warningsFor(document),
                 document.getReviewStatus(),
                 // Only a rejection reason is meant for the applicant.

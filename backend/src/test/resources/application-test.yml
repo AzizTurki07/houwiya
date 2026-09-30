@@ -25,6 +25,9 @@ app:
   admin:
     email: admin@test.local
     password: admin-test-password
+  face:
+    # Off for the document-flow tests; FaceMatchTest switches it on.
+    required: false
   rate-limit:
     # High enough that ordinary tests never trip it; RateLimitTest overrides these.
     auth-per-minute: 10000

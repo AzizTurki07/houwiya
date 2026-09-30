@@ -74,3 +74,13 @@ h1 {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+.face-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+
+  dt { font-weight: 600; }
+  dd { margin: 0; }
+}

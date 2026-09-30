@@ -43,9 +43,34 @@
         }
         @for (photo of photos(); track photo.side) {
           <figure>
-            <img [src]="photo.url" [alt]="'Document ' + photo.side.toLowerCase() + ' side'" />
-            <figcaption class="muted small">{{ photo.side === 'FRONT' ? 'Front' : 'Back' }}</figcaption>
+            <img [src]="photo.url" [alt]="photo.side === 'SELFIE' ? 'Applicant selfie' : 'Document ' + photo.side.toLowerCase() + ' side'" />
+            <figcaption class="muted small">{{ photoCaption[photo.side] }}</figcaption>
           </figure>
+        }
+        <h2>Face check</h2>
+        @if (d.faceMatched === null && d.faceSimilarity === null && d.livenessPassed === null) {
+          <p class="muted small">No selfie was taken.</p>
+        } @else {
+          <dl class="face-check small">
+            <dt>Match</dt>
+            <dd>
+              @if (d.faceMatched === null) {
+                Not verified (no face found)
+              } @else {
+                {{ d.faceMatched ? 'Yes' : 'No' }}
+              }
+              @if (d.faceSimilarity !== null) {
+                <span class="muted">(score {{ d.faceSimilarity.toFixed(2) }}, threshold {{ d.faceThreshold.toFixed(2) }})</span>
+              }
+            </dd>
+            <dt>Liveness</dt>
+            <dd>
+              {{ d.livenessPassed ? 'Passed' : 'Failed' }}
+              @if (d.livenessReason) {
+                <span class="muted">({{ d.livenessReason }})</span>
+              }
+            </dd>
+          </dl>
         }
       </section>
 

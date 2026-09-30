@@ -13,7 +13,7 @@ frontend/android/  Capacitor Android project wrapping the same app (native camer
 docker-compose.yml
 ```
 
-## Current status (Phases 2-6 + data protection; Phase 4 accuracy work ongoing)
+## Current status (Phases 2-6 + data protection + selfie face match; Phase 4 accuracy work ongoing)
 
 - Backend: entities (`User`, `OnboardingSession`, `ExtractedDocument`), JWT auth
   (`/api/auth/register`, `/api/auth/login`), and the full onboarding flow wired to the
@@ -25,11 +25,12 @@ docker-compose.yml
   | `POST /api/onboarding/sessions/{id}/consent` | record consent (`CONSENT_GIVEN`) |
   | `POST /api/onboarding/sessions/{id}/document` | multipart `file` + `documentType` (`PASSPORT`/`CIN`) + optional `side` (`FRONT` default, `BACK` for the CIN) -> calls the matching `/extract/...` endpoint, persists the result, session -> `PENDING_REVIEW`. The CIN back is merged into the same document; re-upload before confirming = retake of that side |
   | `GET  /api/onboarding/sessions/{id}/document` | extracted fields + `fieldConfidence`, `ocrConfidence`, `checksumValid`, `warnings`, `backSideRequired`/`backSideCaptured` for the review screen |
-  | `POST /api/onboarding/sessions/{id}/confirm` | `{"fields": {...}}` with the user's reviewed values -> auto-approved if clean, otherwise `NEEDS_REVIEW` for an admin. A CIN needs both sides first (`409` otherwise) |
+  | `POST /api/onboarding/sessions/{id}/selfie` | multipart `frames` x3 (straight, head turned one way, then the other) -> face match against the document portrait + liveness via `/face/verify`. Returns the outcome (`faceMatched`, `livenessPassed`), never the score. Can be retaken until confirmed |
+  | `POST /api/onboarding/sessions/{id}/confirm` | `{"fields": {...}}` with the user's reviewed values -> auto-approved if clean, otherwise `NEEDS_REVIEW` for an admin. A CIN needs both sides first, and the selfie is required (`409` otherwise; `FACE_MATCH_REQUIRED=false` turns that off) |
 
   Warnings that block auto-approval: `LOW_CONFIDENCE` (overall **or any single
   field** below `app.review.min-confidence`, default 0.7), `CHECKSUM_FAILED`, `MISSING_REQUIRED_FIELDS`, `DOCUMENT_EXPIRED`,
-  `USER_CORRECTED`. A document number already used by another application is rejected
+  `USER_CORRECTED`, `FACE_MISMATCH`, `FACE_NOT_VERIFIED`, `LIVENESS_FAILED`. A document number already used by another application is rejected
   with `409`. Error codes: `422` unreadable image (prompt a retake), `502` AI service
   down/timeout, `404` session not found or not yours, `409` wrong session state.
   Covered by `OnboardingDocumentFlowTest` (AI client mocked) plus the auth tests.
@@ -140,6 +141,49 @@ The password is only used to create the account, never to overwrite it later.
 Duplicate rule: a document number already used by another person is refused. The same
 person may apply again with the same document only after a rejection.
 
+## Selfie face match
+
+After the document photo(s), the applicant takes a selfie with the front camera: three
+frames taken automatically after a countdown -- looking straight, then head turned one way,
+then the other. The AI service (`POST /face/verify`) then:
+
+1. finds the faces (OpenCV **YuNet**) on the stored document photo and in the frames, and
+   compares the portrait with the frontal frame (OpenCV **SFace** embeddings, cosine
+   similarity, match at **0.45**);
+2. checks liveness: frame 1 frontal, frames 2 and 3 turned in opposite directions (yaw from
+   the eye/nose landmarks), exactly one face per frame, and the same person in all three.
+
+Nothing is rejected automatically: a mismatch, a face that couldn't be found, or a failed
+liveness check is a warning, so the case goes to a reviewer, who sees the selfie next to
+the document with the score and the reason. The applicant only sees the outcome and what
+to do differently (retry, or continue and let a person check). Only the frontal frame is
+kept, encrypted, under the same retention rules as the document photos.
+
+**How the threshold was chosen** (real, consented documents; no values recorded): the
+applicant's CIN portrait against their passport portrait scored 0.72; every pair of
+*different* people scored at most 0.35 -- and that maximum was between family members, the
+hardest case. 0.45 sits between the two with a margin on both sides. This is a handful of
+people, so treat it as a sanity check, not a measured error rate.
+
+**Limits, stated plainly.** The head-turn check stops a printed photo or a still image held
+up to the camera. It does not stop a replayed video of the person turning their head, a
+3-D mask, or a camera-injection attack; that needs a certified presentation-attack-detection
+product. The printed CIN portrait is small and often worn, which lowers similarity for
+genuine matches -- one reason doubts go to a person instead of being refused.
+
+Models: YuNet (MIT) and SFace (Apache-2.0) from the OpenCV Zoo, downloaded at image build
+time and pinned by SHA-256 in `ai-service/Dockerfile` (~40 MB, not committed). To run the AI
+service outside Docker, fetch them once into `ai-service/models/`:
+
+```bash
+curl -L -o ai-service/models/face_detection_yunet_2023mar.onnx https://huggingface.co/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx
+curl -L -o ai-service/models/face_recognition_sface_2021dec.onnx https://huggingface.co/opencv/face_recognition_sface/resolve/main/face_recognition_sface_2021dec.onnx
+```
+
+The web app uses the browser camera (`getUserMedia`), which needs HTTPS or localhost --
+Codespaces forwarded ports are HTTPS, and the Android app's WebView asks for the camera
+permission it already declares.
+
 ## Security and data protection
 
 | Measure | How |
@@ -148,7 +192,7 @@ person may apply again with the same document only after a rejection.
 | Photo retention | Photos are stored (encrypted) only so a reviewer can see flagged documents. They are deleted when a document is auto-approved, when an admin decides, when the applicant deletes the verification, and in any case after 30 days (`app.retention.image-days`, daily clean-up). |
 | Right to erasure | Applicants can delete any of their verifications (document, fields and photos) from the app. |
 | Audit trail | Registrations, logins (incl. failures), uploads, confirmations, deletions, every admin view of a document or photo, and every decision are logged with who and when -- never with document values. Admins can read it at `/admin/audit`. |
-| Rate limiting | 10 login/register attempts per minute per IP; 30 document uploads per hour per user (`429` + `Retry-After`). |
+| Rate limiting | 10 login/register attempts per minute per IP; 30 document/selfie uploads per hour per user (`429` + `Retry-After`). |
 | Access control | JWT; roles are re-read on every request; `/api/admin/**` needs ADMIN. No token or an invalid one is `401`, not allowed is `403`. |
 | Schema | Managed by Flyway migrations (`backend/src/main/resources/db/migration`); Hibernate only validates. |
 
@@ -275,6 +319,7 @@ first CI run of the AI workflow builds the image from scratch (a few minutes).
 - Grow the CIN evaluation set further (8 cards today; see `ai-service/eval/README.md`).
 - Reduce "confident but wrong" reads, mostly on first names: e.g. cross-check the CIN
   number against the back's barcode, or try PaddleOCR for dates only (it read 8/8).
-- Selfie face match + liveness against the document photo.
+- Stronger liveness (a certified presentation-attack-detection service) and a larger face
+  evaluation set before relying on the match threshold beyond this demo.
 - Release signing for the Android app (the CI builds a debug APK) and an iOS build.
 - Key rotation for `APP_ENCRYPTION_KEY` (the `v1:` prefix on stored values leaves room).

@@ -113,7 +113,10 @@ export const WARNING_TEXT: Record<DocumentWarning, string> = {
   CHECKSUM_FAILED: "The passport's machine-readable zone didn't validate.",
   MISSING_REQUIRED_FIELDS: 'Some required details could not be read.',
   DOCUMENT_EXPIRED: 'The document appears to be expired.',
-  USER_CORRECTED: 'You corrected some of the extracted details.'
+  USER_CORRECTED: 'You corrected some of the extracted details.',
+  FACE_MISMATCH: "We couldn't match your selfie to the photo on your document.",
+  FACE_NOT_VERIFIED: "We couldn't compare your selfie with your document's photo.",
+  LIVENESS_FAILED: "We couldn't confirm the selfie was taken live."
 };
 
 /** The same warnings, worded for a reviewer rather than the applicant. */
@@ -122,7 +125,10 @@ export const WARNING_ADMIN_TEXT: Record<DocumentWarning, string> = {
   CHECKSUM_FAILED: "The passport's machine-readable zone failed its check digits.",
   MISSING_REQUIRED_FIELDS: 'Required details (number, date of birth or expiry) could not be read.',
   DOCUMENT_EXPIRED: 'The document is expired.',
-  USER_CORRECTED: 'The applicant changed extracted values (highlighted below).'
+  USER_CORRECTED: 'The applicant changed extracted values (highlighted below).',
+  FACE_MISMATCH: 'The selfie does not match the document portrait (score below threshold).',
+  FACE_NOT_VERIFIED: 'No face could be found on the document or in the selfie: compare them yourself.',
+  LIVENESS_FAILED: 'The head-turn liveness check failed: the selfie may be a photo of a photo.'
 };
 
 /** Compact labels for chips (admin queue). */
@@ -131,7 +137,10 @@ export const WARNING_SHORT: Record<DocumentWarning, string> = {
   CHECKSUM_FAILED: 'Checksum failed',
   MISSING_REQUIRED_FIELDS: 'Missing fields',
   DOCUMENT_EXPIRED: 'Expired',
-  USER_CORRECTED: 'Edited by applicant'
+  USER_CORRECTED: 'Edited by applicant',
+  FACE_MISMATCH: 'Face mismatch',
+  FACE_NOT_VERIFIED: 'Face not verified',
+  LIVENESS_FAILED: 'Liveness failed'
 };
 
 export const DOCUMENT_LABEL: Record<DocumentType, string> = {

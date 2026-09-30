@@ -88,6 +88,14 @@ public class ExtractedDocument {
     @Builder.Default
     private boolean backSideCaptured = false;
 
+    // Selfie face match + head-turn liveness (AI service /face/verify). Null until checked.
+    private Double faceSimilarity;         // cosine similarity, document portrait vs selfie
+    private Boolean faceMatched;           // null if a face was missing on either side
+    private Boolean livenessPassed;
+    @Column(length = 200)
+    private String livenessReason;
+    private Instant selfieCheckedAt;
+
     // Manual review outcome (admin queue).
     private String reviewedBy;             // admin e-mail
     private Instant reviewedAt;

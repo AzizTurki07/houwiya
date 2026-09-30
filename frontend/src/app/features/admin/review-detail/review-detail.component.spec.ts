@@ -22,6 +22,11 @@ function detail(overrides: Partial<ReviewDetail> = {}): ReviewDetail {
     checksumValid: null,
     expiryDate: null,
     warnings: ['LOW_CONFIDENCE', 'USER_CORRECTED'],
+    faceSimilarity: 0.72,
+    faceThreshold: 0.45,
+    faceMatched: true,
+    livenessPassed: true,
+    livenessReason: null,
     imageSides: ['FRONT', 'BACK'],
     submittedAt: '2026-09-30T10:00:00Z',
     reviewedBy: null,
@@ -72,6 +77,18 @@ describe('ReviewDetailComponent', () => {
     expect(changed[0].textContent).toContain('OCR read');
     expect(changed[0].textContent).toContain('امبن');
     expect(fixture.nativeElement.querySelector('tr.changed .dot').className).toContain('low');
+  });
+
+  it('shows the face check with its score, for reviewers only', () => {
+    load(detail({
+      warnings: ['FACE_MISMATCH', 'LIVENESS_FAILED'], faceSimilarity: 0.21, faceMatched: false,
+      livenessPassed: false, livenessReason: 'The head did not turn both ways.'
+    }));
+    const text: string = fixture.nativeElement.querySelector('.face-check').textContent;
+    expect(text).toContain('No');
+    expect(text).toContain('score 0.21, threshold 0.45');
+    expect(text).toContain('Failed');
+    expect(text).toContain('The head did not turn both ways.');
   });
 
   it('will not reject without a reason for the applicant', () => {

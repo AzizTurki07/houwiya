@@ -213,9 +213,12 @@ export class CaptureComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** After a CIN front comes its back (unless already captured); everything else goes to review. */
+  /** After a CIN front comes its back (unless already captured), then the selfie, then review. */
   private nextStep(doc: DocumentResponse | null): string {
-    return doc?.backSideRequired && !doc.backSideCaptured ? 'capture-back' : 'review';
+    if (doc?.backSideRequired && !doc.backSideCaptured) {
+      return 'capture-back';
+    }
+    return doc?.selfieRequired && !doc.selfieCaptured ? 'selfie' : 'review';
   }
 
   private toUploadError(err: unknown): UploadError {

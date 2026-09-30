@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Fixed-window rate limits on the endpoints worth abusing:
  *   - login/register, per client IP: slows password guessing and mass sign-ups;
- *   - document uploads, per signed-in user: each one is a multi-second OCR run.
+ *   - document and selfie uploads, per signed-in user: each one is a multi-second AI run.
  *
  * In-memory, so limits are per backend instance -- fine for a single instance. Behind a
  * reverse proxy, set server.forward-headers-strategy=native so the client IP is the real one.
@@ -55,7 +55,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             if (path.equals("/api/auth/login") || path.equals("/api/auth/register")) {
                 rule = authRule;
                 subject = request.getRemoteAddr();
-            } else if (path.startsWith("/api/onboarding/sessions/") && path.endsWith("/document")) {
+            } else if (path.startsWith("/api/onboarding/sessions/")
+                    && (path.endsWith("/document") || path.endsWith("/selfie"))) {
                 rule = uploadRule;
                 subject = currentUser();
             }

@@ -1,0 +1,81 @@
+<main class="page">
+  <app-steps [current]="3" />
+
+  @if (!ready()) {
+    @if (loadError()) {
+      <div class="alert error" role="alert">{{ loadError() }}</div>
+      <a class="btn" routerLink="/">Back to my verifications</a>
+    } @else {
+      <p class="muted" aria-live="polite">Loading…</p>
+    }
+  } @else {
+    @switch (mode()) {
+      @case ('intro') {
+        <h1>Now a quick selfie</h1>
+        <p class="muted">
+          We compare your face with the photo on your document, and check that it's really you in front of the camera.
+        </p>
+        <section class="card">
+          <ol class="poses">
+            @for (p of poses; track p) {
+              <li>{{ p }}</li>
+            }
+          </ol>
+          <p class="muted small">
+            Each photo is taken automatically after a short countdown. Take off sunglasses and hats, and face the light.
+          </p>
+        </section>
+
+        @if (error()) {
+          <div class="alert error" role="alert">{{ error() }}</div>
+        }
+
+        @if (cameraSupported) {
+          <button class="btn primary block" type="button" (click)="start()">Start the selfie</button>
+        } @else {
+          <div class="alert warning" role="alert">
+            This step needs a camera. Open this page on your phone, or in a browser with camera access.
+          </div>
+        }
+      }
+
+      @case ('camera') {
+        <div class="viewfinder">
+          <video #video playsinline muted autoplay aria-label="Front camera"></video>
+          <div class="oval" aria-hidden="true"></div>
+          @if (countdown() > 0) {
+            <span class="count" aria-hidden="true">{{ countdown() }}</span>
+          }
+        </div>
+        <p class="instruction" aria-live="assertive">
+          <span class="muted small">{{ pose() + 1 }} of {{ poses.length }}</span>
+          <strong>{{ poses[pose()] }}</strong>
+        </p>
+        <div class="row end">
+          <button class="btn" type="button" (click)="cancel()">Cancel</button>
+        </div>
+      }
+
+      @case ('uploading') {
+        <section class="card busy" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <h2>Checking your selfie…</h2>
+          <p class="muted">This takes a few seconds.</p>
+        </section>
+      }
+
+      @case ('failed') {
+        <h1>That didn't work</h1>
+        <div class="alert warning" role="alert">{{ error() }}</div>
+        <p class="muted">
+          You can try again, or continue: a member of our team will then compare your selfie with your document themselves,
+          which takes longer.
+        </p>
+        <div class="row end">
+          <button class="btn" type="button" (click)="continueToReview()">Continue anyway</button>
+          <button class="btn primary" type="button" (click)="start()">Try again</button>
+        </div>
+      }
+    }
+  }
+</main>

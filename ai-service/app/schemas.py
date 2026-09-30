@@ -41,3 +41,14 @@ class CinBackExtractionResult(BaseModel):
     issue_date: Optional[str] = None      # ISO, from "تونس في 26 سبتمبر 2019"
     overall_confidence: float = 0.0
     field_confidence: FieldConfidence = Field(default_factory=dict)
+
+
+class FaceVerificationResult(BaseModel):
+    """Shape returned by /face/verify."""
+    document_face_found: bool
+    selfie_face_found: bool
+    similarity: Optional[float] = None   # cosine similarity, document portrait vs frontal selfie
+    match: Optional[bool] = None         # None when either face is missing
+    threshold: float
+    liveness_passed: bool
+    liveness_reason: Optional[str] = None

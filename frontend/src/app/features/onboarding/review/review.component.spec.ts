@@ -38,6 +38,10 @@ function cinDocument(overrides: Partial<DocumentResponse> = {}): DocumentRespons
     userCorrected: false,
     backSideRequired: true,
     backSideCaptured: true,
+    selfieRequired: true,
+    selfieCaptured: true,
+    faceMatched: true,
+    livenessPassed: true,
     warnings: [],
     reviewStatus: 'PENDING',
     decisionReason: null,
@@ -150,6 +154,11 @@ describe('ReviewComponent', () => {
   it('sends the user to photograph the back when a CIN has only its front', () => {
     load(cinDocument({ backSideCaptured: false }));
     expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'capture-back'], { replaceUrl: true });
+  });
+
+  it('sends the user to take the selfie when it is still missing', () => {
+    load(cinDocument({ selfieCaptured: false, faceMatched: null, livenessPassed: null }));
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'selfie'], { replaceUrl: true });
   });
 
   it('offers separate retakes for both sides of a CIN', () => {

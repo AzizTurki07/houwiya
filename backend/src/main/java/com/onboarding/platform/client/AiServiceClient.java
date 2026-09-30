@@ -62,6 +62,46 @@ public class AiServiceClient {
         }
     }
 
+    /**
+     * Document portrait vs selfie + liveness (POST /face/verify). frames[0] must look straight at
+     * the camera, the others turn the head. Missing faces come back in the result, not as errors.
+     */
+    public JsonNode verifyFace(byte[] documentImage, String documentContentType, java.util.List<byte[]> frames) {
+        MultipartBodyBuilder body = new MultipartBodyBuilder();
+        body.part("document", named(documentImage, "document"))
+                .contentType(documentContentType != null ? MediaType.parseMediaType(documentContentType) : MediaType.APPLICATION_OCTET_STREAM);
+        for (int i = 0; i < frames.size(); i++) {
+            body.part("selfies", named(frames.get(i), "selfie-" + i + ".jpg")).contentType(MediaType.IMAGE_JPEG);
+        }
+        try {
+            return webClient.post()
+                    .uri("/face/verify")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(BodyInserters.fromMultipartData(body.build()))
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().isSameCodeAs(HttpStatus.UNPROCESSABLE_ENTITY)) {
+                throw new DocumentUnreadableException(detailFrom(e));
+            }
+            throw new AiServiceUnavailableException("AI service returned " + e.getStatusCode().value(), e);
+        } catch (WebClientRequestException e) {
+            throw new AiServiceUnavailableException("AI service is unreachable", e);
+        } catch (RuntimeException e) {
+            throw new AiServiceUnavailableException("AI service call failed: " + e.getMessage(), e);
+        }
+    }
+
+    private static ByteArrayResource named(byte[] bytes, String filename) {
+        return new ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        };
+    }
+
     private static String pathFor(DocumentType type, DocumentSide side) {
         return switch (type) {
             case PASSPORT -> "/extract/passport";

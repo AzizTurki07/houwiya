@@ -32,6 +32,12 @@ public record DocumentResponse(
         /** CIN: the back (address, issue date) is a second photo the user still has to take. */
         boolean backSideRequired,
         boolean backSideCaptured,
+        /** A selfie is part of the flow; captured once the face check has run. */
+        boolean selfieRequired,
+        boolean selfieCaptured,
+        /** Outcome only -- the applicant never sees the similarity score. Null until checked. */
+        Boolean faceMatched,
+        Boolean livenessPassed,
         List<DocumentWarning> warnings,
         ReviewStatus reviewStatus,
         /** Why an admin rejected the document; null unless reviewStatus is REJECTED. */

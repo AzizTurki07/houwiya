@@ -50,6 +50,12 @@ export const routes: Routes = [
           import('./features/onboarding/capture/capture.component').then((m) => m.CaptureComponent)
       },
       {
+        path: 'selfie',
+        title: 'Take a selfie · Houwiya',
+        loadComponent: () =>
+          import('./features/onboarding/selfie/selfie.component').then((m) => m.SelfieComponent)
+      },
+      {
         path: 'review',
         title: 'Check your details · Houwiya',
         loadComponent: () =>

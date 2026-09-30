@@ -53,6 +53,10 @@ export class ReviewComponent implements OnInit {
           this.router.navigate(['/onboarding', this.sessionId, 'capture-back'], { replaceUrl: true });
           return;
         }
+        if (doc.selfieRequired && !doc.selfieCaptured) {
+          this.router.navigate(['/onboarding', this.sessionId, 'selfie'], { replaceUrl: true });
+          return;
+        }
         this.setDocument(doc);
       },
       error: (err) => {
