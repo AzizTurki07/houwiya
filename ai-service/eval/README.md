@@ -52,21 +52,54 @@ On Windows Git Bash, prefix with `MSYS_NO_PATHCONV=1` and use `$(pwd -W)` instea
   it. This is the most important number: a flagged mistake gets caught by the user or an admin,
   an unflagged one doesn't.
 
-## Findings so far (1 passport, 1 CIN front + back)
+## Findings
 
-- **Card detection** had to be rebuilt for hand-held photos: fingers hide corners and the card
-  often runs off the frame. The detector now fits the card edges as lines, infers a hidden side
-  from the ID-1 aspect ratio, and treats the photo border as an edge when the card runs off it.
-- **Ink filtering** is the biggest single win: keeping only the black value text (dropping the
-  purple labels, background art and stamp) took the text-field error rate from 0.37 to 0.25
-  before any other change. Arabic dots must survive speck removal: they are what distinguish
-  ب/ت/ث/ن/ي.
-- **Tesseract's Arabic model misreads Latin digits** inside Arabic lines ("26" -> "6"). Digit
+Current set: 4 CIN fronts, 4 CIN backs (8 people's cards, including two married women's) and
+1 passport, all phone photos taken in the hand. Numbers below are for the 36 CIN fields.
+
+| Pipeline version (Tesseract) | Exact CIN fields | Mean CER |
+|---|---|---|
+| Tuned on one card only (baseline on the 8-card set) | 14/36 (39%) | 0.47 |
+| + adaptive ink threshold (Otsu per band) | 19/36 | 0.44 |
+| + row detection with valley splitting, snapped to the layout | 18/36 | 0.32 |
+| + dictionary correction (places, address words, professions) | 21/36 | 0.25 |
+| + ink threshold boundary fix | **21/36 (58%)** | **0.21** |
+
+What each step taught us:
+
+- **One card is not a benchmark.** Parameters tuned on a single card dropped to 39% exact on
+  eight. Text darkness alone varied from lightness 27 to 144 between photos (lighting, a
+  faded print), so fixed thresholds could not work.
+- **Card detection** had to handle cards held in the hand: fingers hide corners and the card
+  often runs off the frame. The detector fits the card edges as lines, infers a hidden side
+  from the ID-1 aspect ratio, and uses the photo border when the card runs off it. It found
+  all 8 cards correctly.
+- **Ink filtering** keeps only the black value text (the purple labels, background art and
+  the stamp are dropped by colour); the dark/light split is computed per field band. Arabic
+  dots must survive speck removal -- they are what distinguish ب/ت/ث/ن/ي -- while isolated
+  marks away from any letter (label remnants) must not, or they OCR as runs of zeros.
+- **Row positions vary between cards**, so each field is snapped to the text row actually
+  found near its usual position. Closely spaced lines touch through ascenders/descenders and
+  are split at the valley between them.
+- **Married women's cards use another layout**: the name line reads "<name> بنت <father> بن
+  <grandfather>" and the next line is the husband ("حرم ..."). The lineage is moved out of the
+  name, and the spouse line is dropped (not needed for verification -- like the mother's name
+  on the back, it is never returned).
+- **Tesseract's Arabic model misreads Latin digits** inside Arabic lines ("26" -> "6"); digit
   groups are re-read with the digits-only English model.
-- **`tessdata_best` Arabic was worse than the default `tessdata_fast`** on these crops
-  (CER 0.375 vs 0.252), so the image keeps the packaged model.
-- **PaddleOCR vs Tesseract**: both read 7/9 CIN fields exactly. PaddleOCR gets slightly more
-  letters right, but it is overconfident on its mistakes (0.99 on a wrong name) and adds ~1 GB.
-  Tesseract stays in production. Revisit with a larger sample set.
-- **Passport**: all 7 fields exact. The evaluation caught a bug where expired passports had
+- **Most remaining errors were one-letter misses of known words** (بنزرت read six different
+  ways). Replacing a token by a governorate/town, generic address word or profession is safe
+  only for true near misses: a similarity ratio wrongly turned the name "سالم" into the town
+  "الجم", so correction uses edit distance (1 letter for words up to 6 letters). Sample-specific
+  neighbourhood names are deliberately *not* in the dictionaries.
+- **`tessdata_best` Arabic was worse than the default `tessdata_fast`** on these crops.
+- **PaddleOCR vs Tesseract** (same preprocessed field images): PaddleOCR reads dates and places
+  better (23/36 exact vs 21/36) but its mean CER is higher (0.32 vs 0.21), it is more often
+  confidently wrong (7 vs 5 fields wrong at >= 0.7 confidence -- the ones the review screen
+  would not flag), and it adds ~1 GB to the image. Tesseract stays in production; a hybrid
+  (PaddleOCR for dates only) is an option if the image size is acceptable.
+- **Names remain the weak spot** (25% exact first names for both engines): an open vocabulary,
+  so no dictionary can help. This is why every flagged document goes to human review with the
+  photo, and why the applicant confirms every field.
+- **Passport**: all 7 MRZ fields exact. The evaluation caught a bug where expired passports had
   their expiry pushed a century ahead (2020 -> 2120) and so were never flagged as expired.

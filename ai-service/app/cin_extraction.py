@@ -16,8 +16,9 @@ free text, each field is read from its own horizontal band of the normalised car
 Bands were calibrated on real (consented) cards -- see ai-service/eval/ for the labelled
 evaluation set and the accuracy report.
 """
+import difflib
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -25,16 +26,20 @@ import pytesseract
 
 from app.arabic_text import clean, clean_name, parse_arabic_date
 from app.card_detection import CardNotDetectedError, detect_and_crop_card  # noqa: F401 (re-exported)
+from app.lexicon import ADDRESS_WORDS, PLACES, PROFESSIONS, correct_phrase, correct_tokens
 from app.schemas import CinBackExtractionResult, CinExtractionResult
 
 # Same value as the passport pipeline: a field that fails its own validation.
 LOW_FIELD_CONFIDENCE = 0.3
 
-# Ink filter thresholds (CIE L*a*b*, 8-bit), measured on real cards: value text is near black
-# (L ~45, chroma ~5); the purple labels are lighter (L 70-95) and violet (a > 0, b < 0).
-INK_MAX_LIGHTNESS = 100
-INK_MAX_CHROMA = 12
-INK_MIN_B_MINUS_A = -8
+# Ink filter (CIE L*a*b*, 8-bit). Value text is colour-neutral; the purple labels are violet
+# (a > 0, b < 0) and the stamp blue, so colour separates them. *How dark* the text is depends
+# on the photo: measured text lightness ranged from 27 to 144 across real cards (lighting, a
+# faded print), so the dark/light split is computed per band (Otsu) rather than fixed.
+INK_MAX_CHROMA = 16
+INK_MIN_B_MINUS_A = -10
+INK_LIGHTNESS_CAP = 190        # never treat anything lighter than this as ink
+INK_MIN_CONTRAST = 25          # text must be at least this much darker than the background
 # Connected components smaller than this are background specks. Keep it small: Arabic dots
 # are what tell ب/ت/ث/ن/ي apart, and a larger cut-off measurably hurt accuracy.
 MIN_SPECK_AREA = 4
@@ -68,33 +73,44 @@ BACK_FIELDS: Dict[str, FieldBand] = {
 }
 
 
-def ink_image(region: np.ndarray) -> np.ndarray:
-    """Grayscale image with everything except the black value text turned white, upscaled."""
+def ink_mask(region: np.ndarray) -> Tuple[np.ndarray, float]:
+    """(boolean mask of the black value text in a card region, the lightness threshold used)."""
     lab = cv2.cvtColor(region, cv2.COLOR_BGR2LAB).astype(np.int16)
     lightness, a, b = lab[..., 0], lab[..., 1] - 128, lab[..., 2] - 128
-    ink = ((lightness < INK_MAX_LIGHTNESS)
-           & (np.sqrt(a * a + b * b) < INK_MAX_CHROMA)
-           & ((b - a) > INK_MIN_B_MINUS_A)).astype(np.uint8)
+    neutral = (np.sqrt(a * a + b * b) < INK_MAX_CHROMA) & ((b - a) > INK_MIN_B_MINUS_A)
+    threshold = ink_threshold(lightness[neutral])
+    ink = (neutral & (lightness <= threshold)).astype(np.uint8)
+
     count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    area = stats[:, cv2.CC_STAT_AREA]
     keep = np.zeros(count, bool)
-    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= MIN_SPECK_AREA
-    # Small marks are only kept near real text: Arabic dots sit right next to their letter,
-    # while stray remnants of a label or the background sit apart (and OCR as phantom digits).
-    big = [i for i in range(1, count) if stats[i, cv2.CC_STAT_AREA] >= 40]
-    if big:
-        x1 = min(stats[i, cv2.CC_STAT_LEFT] for i in big) - 12
-        x2 = max(stats[i, cv2.CC_STAT_LEFT] + stats[i, cv2.CC_STAT_WIDTH] for i in big) + 12
-        for i in range(1, count):
-            left, width = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_WIDTH]
-            if stats[i, cv2.CC_STAT_AREA] < 40 and (left + width < x1 or left > x2):
-                keep[i] = False
-    # Keep the original grey levels of the ink (anti-aliased edges help the LSTM) on white.
-    # Growing the mask must not pull the violet label pixels next to a value back in.
+    keep[1:] = area[1:] >= MIN_SPECK_AREA
+    # Small marks are kept only right next to real letters: Arabic dots sit within a few
+    # pixels of their letter, while remnants of a label or the background art sit apart (and
+    # OCR as phantom zeros).
+    big = np.zeros(count, bool)
+    big[1:] = area[1:] >= 40
+    if big.any():
+        near_letters = cv2.dilate(big[labels].astype(np.uint8), np.ones((21, 21), np.uint8)).astype(bool)
+        attached = np.zeros(count, bool)
+        attached[np.unique(labels[near_letters])] = True
+        keep &= big | attached
+    # Growing the mask (below) must not pull the violet label pixels next to a value back in.
     violet = ((a - b) > 8) & (np.sqrt(a * a + b * b) > 8)
     mask = cv2.dilate(keep[labels].astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool) & ~violet
+    return mask, threshold
+
+
+def ink_image(region: np.ndarray) -> np.ndarray:
+    """Grayscale image with everything except the black value text turned white, upscaled."""
+    mask, threshold = ink_mask(region)
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
     out = np.full_like(gray, 255)
-    out[mask] = gray[mask]
+    if mask.any():
+        # Stretch the ink's own range to near-black: faded grey print reads far better.
+        darkest = float(np.percentile(gray[mask], 2))
+        span = max(1.0, float(threshold) - darkest)
+        out[mask] = np.clip((gray[mask] - darkest) / span * 200, 0, 255).astype(np.uint8)
     # Tesseract reads a line most reliably when it is tightly framed by a white margin:
     # text touching the edge, or a wide empty stretch beside it, causes dropped/phantom glyphs.
     ys, xs = np.nonzero(mask)
@@ -102,6 +118,125 @@ def ink_image(region: np.ndarray) -> np.ndarray:
         out = out[max(0, ys.min() - 4):ys.max() + 5, max(0, xs.min() - 4):xs.max() + 5]
     out = cv2.resize(out, None, fx=UPSCALE, fy=UPSCALE, interpolation=cv2.INTER_CUBIC)
     return cv2.copyMakeBorder(out, 24, 24, 24, 24, cv2.BORDER_CONSTANT, value=255)
+
+
+def ink_threshold(neutral_lightness: np.ndarray) -> float:
+    """
+    Lightness at or below which a neutral pixel counts as text, for one band: Otsu's split between
+    the dark text and the light card, capped, and never closer to the background than
+    INK_MIN_CONTRAST (so an empty band doesn't turn background texture into "text").
+    """
+    if neutral_lightness.size < 50:
+        return 0.0
+    values = np.clip(neutral_lightness, 0, 255).astype(np.uint8).reshape(-1, 1)
+    otsu, _ = cv2.threshold(values, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    background = float(np.percentile(neutral_lightness, 60))
+    return min(float(otsu), INK_LIGHTNESS_CAP, background - INK_MIN_CONTRAST)
+
+
+# Where the value rows are searched for: the text column right of the photo on the front,
+# left of the fingerprint on the back. Rows are then found from the ink itself, because their
+# exact height varies from card to card by more than a fixed band tolerates.
+FRONT_COLUMN = (330, 290, 965, 615)
+BACK_COLUMN = (25, 40, 668, 415)
+
+
+def find_rows(card: np.ndarray, column: Tuple[int, int, int, int]) -> List[Tuple[int, int]]:
+    """Text rows (top, bottom) in card coordinates inside `column`, top to bottom."""
+    x1, y1, x2, y2 = column
+    mask, _ = ink_mask(card[y1:y2, x1:x2])
+    profile = np.convolve(mask.sum(axis=1).astype(float), np.ones(3) / 3, mode="same")
+    if profile.max() == 0:
+        return []
+    has_ink = profile > 0.08 * profile.max()
+    runs, start = [], None
+    for y, on in enumerate(has_ink):
+        if on and start is None:
+            start = y
+        elif not on and start is not None:
+            runs.append([start, y])
+            start = None
+    if start is not None:
+        runs.append([start, len(has_ink)])
+    # Dots above/below a line leave small gaps: merge runs a few pixels apart.
+    merged: List[List[int]] = []
+    for begin, end in runs:
+        if merged and begin - merged[-1][1] < 7:
+            merged[-1][1] = end
+        else:
+            merged.append([begin, end])
+    # Closely spaced lines (a married woman's name lines, faded print) touch through their
+    # ascenders/descenders and come out as one tall run: split those at their valleys.
+    rows = [piece for begin, end in merged for piece in _split_at_valleys(profile, begin, end)]
+    # Text rows on the normalised card are ~30-60 px tall; thinner runs are noise.
+    return [(y1 + b, y1 + e) for b, e in rows if e - b >= 15]
+
+
+def _split_at_valleys(profile: np.ndarray, begin: int, end: int) -> List[Tuple[int, int]]:
+    """One text line has no deep gap in its middle; two merged lines do. Split recursively
+    at the lowest point if it is well below the ink peaks on *both* sides of it."""
+    if end - begin < 60:
+        return [(begin, end)]
+    segment = profile[begin:end]
+    left_peak = np.maximum.accumulate(segment)
+    right_peak = np.maximum.accumulate(segment[::-1])[::-1]
+    ratio = segment / np.maximum(1e-6, np.minimum(left_peak, right_peak))
+    ratio[:15] = ratio[-15:] = np.inf  # a cut must leave a real line on each side
+    cut = int(np.argmin(ratio))
+    if ratio[cut] >= 0.45:
+        return [(begin, end)]
+    return _split_at_valleys(profile, begin, begin + cut) + _split_at_valleys(profile, begin + cut, end)
+
+
+SNAP_TOLERANCE = 30  # px on the normalised card
+
+
+def _band_from_rows(rows: List[Tuple[int, int]], column, top: int, bottom: int, template: FieldBand) -> FieldBand:
+    """Band spanning [top, bottom], extended halfway towards the neighbouring detected rows."""
+    _, y1, _, y2 = column
+    x1, _, x2, _ = template.box  # keep the field's own horizontal extent
+    above = [r for r in rows if r[1] <= top]
+    below = [r for r in rows if r[0] >= bottom]
+    upper = max(top - 8, (above[-1][1] + top) // 2) if above else top - 8
+    lower = min(bottom + 8, (bottom + below[0][0]) // 2) if below else bottom + 8
+    return FieldBand((x1, max(y1, upper), x2, min(y2, lower)), template.kind, template.block)
+
+
+def snap_to_rows(card: np.ndarray, column, template: Dict[str, FieldBand]) -> Dict[str, FieldBand]:
+    """
+    Fit each field's band to the text row actually found near its usual position. A field
+    with no detected row close enough (e.g. two lines merged into one run) keeps its fixed
+    band, so one bad row never shifts the others. Multi-line fields take every row whose
+    centre lies inside their usual band.
+    """
+    rows = find_rows(card, column)
+    layout = dict(template)
+    for name, band in template.items():
+        x1, y1, x2, y2 = band.box
+        if band.box[0] != column[0] and band.box[2] != column[2]:
+            continue  # not part of this column (e.g. the card number above the rows)
+        if band.block:
+            inside = [r for r in rows if y1 <= (r[0] + r[1]) / 2 <= y2]
+            if inside:
+                layout[name] = _band_from_rows(rows, column, inside[0][0], inside[-1][1], band)
+            continue
+        centre = (y1 + y2) / 2
+        nearest = min(rows, key=lambda r: abs((r[0] + r[1]) / 2 - centre), default=None)
+        if nearest is not None and abs((nearest[0] + nearest[1]) / 2 - centre) <= SNAP_TOLERANCE:
+            layout[name] = _band_from_rows(rows, column, nearest[0], nearest[1], band)
+    return layout
+
+
+def locate_front(card: np.ndarray) -> Dict[str, FieldBand]:
+    """Front bands: surname, first name, lineage (or, on a married woman's card, the spouse
+    line), date and place of birth -- each snapped to its detected row."""
+    return snap_to_rows(card, FRONT_COLUMN, FRONT_FIELDS)
+
+
+def locate_back(card: np.ndarray) -> Dict[str, FieldBand]:
+    """Back bands: profession, the address line(s), issue date -- snapped to detected rows.
+    The mother's name row is never read."""
+    return snap_to_rows(card, BACK_COLUMN, BACK_FIELDS)
 
 
 def field_images(card: np.ndarray, fields: Dict[str, FieldBand]) -> Dict[str, np.ndarray]:
@@ -198,9 +333,11 @@ def _read_line(image: np.ndarray, kind: str) -> Tuple[str, float]:
         # The raw-line mode tends to fuse the day with neighbouring glyphs ("02" -> "12").
         return _join(_reread_digits(image, _ocr_words(image, "ara", "--psm 7")))
     # psm 7 (line) and 13 (raw line) fail on different inputs -- short one-word values
-    # especially -- so read both and keep the one Tesseract is more confident in.
-    return max((_join(_reread_digits(image, _ocr_words(image, "ara", f"--psm {psm}"))) for psm in (7, 13)),
-               key=lambda r: r[1])
+    # especially -- so read both and keep the one Tesseract is more confident in. Single-word
+    # mode (8) is only a fallback: it readily returns a confident fragment of a longer word.
+    reads = [_join(_reread_digits(image, _ocr_words(image, "ara", f"--psm {psm}"))) for psm in (7, 13)]
+    best = max(reads, key=lambda r: (bool(r[0]), r[1]))
+    return best if best[0] else _join(_reread_digits(image, _ocr_words(image, "ara", "--psm 8")))
 
 
 def tesseract_read(image: np.ndarray, band: FieldBand) -> Tuple[str, float]:
@@ -234,8 +371,12 @@ def parse_value(field: str, band: FieldBand, raw: str) -> Tuple[Optional[str], b
 Reader = Callable[[np.ndarray, FieldBand], Tuple[str, float]]
 
 
-def read_fields(card: np.ndarray, fields: Dict[str, FieldBand], reader: Reader = tesseract_read):
+Locator = Callable[[np.ndarray], Dict[str, FieldBand]]
+
+
+def read_fields(card: np.ndarray, locate: Locator, reader: Reader = tesseract_read):
     """Returns ({field: value}, {field: confidence}, number of fields that validated)."""
+    fields = locate(card)
     values, confidences, valid_count = {}, {}, 0
     for name, image in field_images(card, fields).items():
         band = fields[name]
@@ -251,15 +392,54 @@ def read_fields(card: np.ndarray, fields: Dict[str, FieldBand], reader: Reader =
     return values, confidences, valid_count
 
 
-def _read_card(image_bytes: bytes, fields: Dict[str, FieldBand], key_field: str, reader: Reader):
+def _read_card(image_bytes: bytes, locate: Locator, key_field: str, reader: Reader):
     card = detect_and_crop_card(image_bytes)
-    values, confidences, valid = read_fields(card, fields, reader)
+    values, confidences, valid = read_fields(card, locate, reader)
     if not _key_ok(values, confidences, key_field):
         # Upside-down photo is the common mistake: try the card rotated 180 degrees.
-        rotated = read_fields(cv2.rotate(card, cv2.ROTATE_180), fields, reader)
+        rotated = read_fields(cv2.rotate(card, cv2.ROTATE_180), locate, reader)
         if rotated[2] > valid:
             values, confidences, valid = rotated
     return values, confidences
+
+
+def split_name_and_lineage(values: Dict[str, Optional[str]], confidences: Dict[str, float]) -> None:
+    """
+    A married woman's card prints "<first name> بنت <father> بن <grandfather>" on the first-name
+    line and "حرم <husband's name>" on the next. Move the lineage out of the first name, and
+    drop the spouse line: verification doesn't need it (data minimisation, like the mother's
+    name on the back).
+    """
+    first = (values.get("first_name") or "").split()
+    marker = _lineage_start(first)
+    lineage = values.get("lineage") or ""
+    is_spouse_line = lineage.startswith("حر")  # "حرم", tolerant of a misread last letter
+    if marker is not None:
+        values["first_name"] = " ".join(first[:marker])
+        values["lineage"] = " ".join(first[marker:])
+        confidences["lineage"] = confidences.get("first_name", 0.0)
+    elif is_spouse_line:
+        values["lineage"] = None
+        confidences["lineage"] = 0.0
+
+
+def _lineage_start(tokens: List[str]) -> Optional[int]:
+    """
+    Index where "بن/بنت <father> بن <grandfather>" starts inside a name line, tolerating an
+    OCR-damaged "بنت" (بثت, نت...). To avoid splitting a first name that merely looks like
+    "بنت", the rest must also contain a "بن" further on -- a lineage always does.
+    """
+    def like(token: str, word: str) -> bool:
+        return token == word or (abs(len(token) - len(word)) <= 1
+                                 and difflib.SequenceMatcher(None, token, word).ratio() >= 0.66)
+
+    for i in range(1, len(tokens)):
+        if tokens[i] in ("بن", "بنت") or like(tokens[i], "بنت"):
+            if tokens[i] in ("بن", "بنت") and any(t == "بن" for t in tokens[i + 1:]) or                     any(like(t, "بن") or t == "بن" for t in tokens[i + 2:]):
+                return i
+            if tokens[i] in ("بن", "بنت") and i + 1 < len(tokens):
+                return i  # clearly read marker: trust it even if the rest is damaged
+    return None
 
 
 def _key_ok(values, confidences, key_field) -> bool:
@@ -268,7 +448,9 @@ def _key_ok(values, confidences, key_field) -> bool:
 
 def extract_cin_fields(image_bytes: bytes, reader: Reader = tesseract_read) -> CinExtractionResult:
     """Front side. Raises CardNotDetectedError if no card outline can be found."""
-    values, confidences = _read_card(image_bytes, FRONT_FIELDS, "document_number", reader)
+    values, confidences = _read_card(image_bytes, locate_front, "document_number", reader)
+    split_name_and_lineage(values, confidences)
+    values["place_of_birth"] = correct_phrase(values.get("place_of_birth"), PLACES)
     return CinExtractionResult(
         **values,
         # The weakest field decides: one badly read field should send the document to review.
@@ -279,7 +461,9 @@ def extract_cin_fields(image_bytes: bytes, reader: Reader = tesseract_read) -> C
 
 def extract_cin_back_fields(image_bytes: bytes, reader: Reader = tesseract_read) -> CinBackExtractionResult:
     """Back side. Raises CardNotDetectedError if no card outline can be found."""
-    values, confidences = _read_card(image_bytes, BACK_FIELDS, "issue_date", reader)
+    values, confidences = _read_card(image_bytes, locate_back, "issue_date", reader)
+    values["profession"] = correct_phrase(values.get("profession"), PROFESSIONS)
+    values["address"] = correct_tokens(values.get("address"), ADDRESS_WORDS)
     return CinBackExtractionResult(
         **values,
         overall_confidence=min(confidences.values()),

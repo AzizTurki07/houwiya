@@ -11,7 +11,8 @@ from typing import Optional
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 # Tatweel, harakat (short-vowel marks) and invisible bidi controls Tesseract likes to emit.
 _NOISE = re.compile(r"[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069]")
-_NON_ARABIC_JUNK = re.compile(r"[^\u0600-\u06FF0-9\s\-/]")
+# "." is kept: addresses abbreviate, e.g. "ب.المدينة".
+_NON_ARABIC_JUNK = re.compile(r"[^\u0600-\u06FF0-9\s\-/.]")
 
 # Tunisia (like the rest of the Maghreb) uses French-derived month names; the Middle-Eastern
 # ones are included in case a card or OCR output uses them.
@@ -40,7 +41,8 @@ def clean(text: str) -> str:
     """Strip OCR noise: bidi marks, tatweel, stray Latin/punctuation, extra whitespace."""
     text = normalize_digits(_NOISE.sub("", text or ""))
     text = _NON_ARABIC_JUNK.sub(" ", text)
-    return " ".join(text.split())
+    # A dot only means something inside an abbreviation (ب.المدينة); at a token's edge it is a speck.
+    return " ".join(t for t in (token.strip(".") for token in text.split()) if t)
 
 
 def clean_name(text: str) -> str:

@@ -51,10 +51,16 @@ docker-compose.yml
     deliberately not extracted). `422` if no card is found.
   - Every result carries a `field_confidence` map (0-1 per field); a field that fails its
     own validation (check digit, 8-digit number, date) is capped at 0.3.
-  - Tests (39): synthetic CIN front/back fixtures in the real layout
+  - Measured on 8 real consented cards (4 fronts, 4 backs): 58% of CIN fields exact, mean
+    character error rate 0.21, CIN number 4/4 -- see the evaluation report for the per-field
+    table and what each pipeline step changed. Rows are located per photo, text darkness is
+    thresholded per field, married women's cards (lineage on the name line, spouse line
+    dropped) are handled, and places/address words/professions get near-miss dictionary
+    correction.
+  - Tests (54): synthetic CIN fixtures in the real layout incl. a married woman's faded card
     (`tests/generate_cin_fixture.py`, fictitious data), card detection with a thumb over a
-    corner / card off the frame, Arabic date parsing, passport per-field rules and the
-    expiry-century regression.
+    corner / card off the frame, the layout logic, Arabic date parsing, passport rules and
+    the expiry-century regression.
 - Frontend: Angular 18, full end-to-end flow (lazy-loaded standalone components):
   sign in / register -> my verifications -> consent -> choose passport or CIN ->
   live camera with a document guide (or upload a photo) -> upload progress + "reading
@@ -229,10 +235,9 @@ first CI run of the AI workflow builds the image from scratch (a few minutes).
 
 ## Next steps
 
-- Grow the CIN evaluation set to 10-20 consented cards (`ai-service/eval/README.md`) and
-  re-run the Tesseract vs PaddleOCR comparison on it; current numbers come from one card.
-- Reduce "confident but wrong" reads (Tesseract's confidence is poorly calibrated on
-  Arabic names), e.g. by cross-checking the CIN number against the back's barcode.
+- Grow the CIN evaluation set further (8 cards today; see `ai-service/eval/README.md`).
+- Reduce "confident but wrong" reads, mostly on first names: e.g. cross-check the CIN
+  number against the back's barcode, or try PaddleOCR for dates only (it read 8/8).
 - Selfie face match + liveness against the document photo.
 - Mobile app (Capacitor, Phase 6).
 - Key rotation for `APP_ENCRYPTION_KEY` (the `v1:` prefix on stored values leaves room).

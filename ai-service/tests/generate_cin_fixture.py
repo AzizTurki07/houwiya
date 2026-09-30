@@ -37,6 +37,19 @@ FRONT = {
     "date_of_birth": "14 سبتمبر 1996",
     "place_of_birth": "صفاقس",
 }
+# A married woman's card: the first-name line carries the lineage ("... بنت ... بن ...") and
+# the next line is the spouse ("حرم ..."). Printed faded (grey, not black) -- both patterns
+# broke the first version of the pipeline on real cards.
+FRONT_MARRIED = {
+    "document_number": "05512873",
+    "last_name": "بن سالم",
+    "first_name": "أمينة بنت محمد بن صالح",
+    "lineage": "حرم علي التونسي",
+    "date_of_birth": "07 جانفي 1992",
+    "place_of_birth": "سوسة",
+}
+FADED = (115, 115, 118)
+
 BACK = {
     "mother": "فاطمة الزهراء",
     "profession": "مهندس",
@@ -67,7 +80,7 @@ def background(draw):
     draw.ellipse([520, 260, 760, 500], outline=(232, 226, 214), width=10)
 
 
-def front():
+def front(values=FRONT, ink=BLACK):
     img = Image.new("RGB", (W, H), CARD_BG)
     d = ImageDraw.Draw(img)
     background(d)
@@ -76,7 +89,7 @@ def front():
     rtl(d, 790, 85, "بطاقة التعريف الوطنية", 52, PURPLE, bold=True)
     d.line([(20, 190), (980, 190)], fill=PURPLE, width=2)
     d.rectangle([60, 235, 300, 570], fill=(200, 200, 200))                 # photo
-    d.text((405, 212), FRONT["document_number"], font=font(50, bold=True), fill=BLACK)
+    d.text((405, 212), values["document_number"], font=font(50, bold=True), fill=ink)
 
     rows = [  # (label, value key, row top, label right edge)
         ("اللقب", "last_name", 315, 950),
@@ -88,7 +101,7 @@ def front():
     for label, key, top, right in rows:
         if label:
             right = rtl(d, right, top + 12, label, 24, PURPLE) - 14
-        rtl(d, right, top - 14, FRONT[key], 44, BLACK, bold=True)
+        rtl(d, right, top - 14, values[key], 44, ink, bold=True)
     return img
 
 
@@ -133,7 +146,8 @@ def photograph(card: Image.Image) -> np.ndarray:
 
 if __name__ == "__main__":
     out_dir = os.path.join(HERE, "fixtures")
-    for name, card in (("sample_cin_front.png", front()), ("sample_cin_back.png", back())):
+    for name, card in (("sample_cin_front.png", front()), ("sample_cin_back.png", back()),
+                       ("sample_cin_front_married_faded.png", front(FRONT_MARRIED, FADED))):
         path = os.path.join(out_dir, name)
         cv2.imwrite(path, photograph(card))
         print("wrote", path)
