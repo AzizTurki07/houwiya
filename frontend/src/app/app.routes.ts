@@ -42,6 +42,14 @@ export const routes: Routes = [
           import('./features/onboarding/capture/capture.component').then((m) => m.CaptureComponent)
       },
       {
+        // Separate route (not a query param) so Angular builds a fresh component after the front.
+        path: 'capture-back',
+        data: { side: 'BACK' },
+        title: 'Back of your ID card · Houwiya',
+        loadComponent: () =>
+          import('./features/onboarding/capture/capture.component').then((m) => m.CaptureComponent)
+      },
+      {
         path: 'review',
         title: 'Check your details · Houwiya',
         loadComponent: () =>

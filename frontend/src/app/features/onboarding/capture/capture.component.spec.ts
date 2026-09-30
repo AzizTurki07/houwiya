@@ -14,7 +14,7 @@ describe('CaptureComponent', () => {
   let httpMock: HttpTestingController;
   let router: Router;
 
-  function setup(queryParams: Record<string, string> = {}): void {
+  function setup(queryParams: Record<string, string> = {}, data: Record<string, string> = {}): void {
     TestBed.configureTestingModule({
       imports: [CaptureComponent],
       providers: [
@@ -23,7 +23,9 @@ describe('CaptureComponent', () => {
         provideHttpClientTesting(),
         {
           provide: ActivatedRoute,
-          useValue: { snapshot: { paramMap: convertToParamMap({ id: SESSION }), queryParamMap: convertToParamMap(queryParams) } }
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ id: SESSION }), queryParamMap: convertToParamMap(queryParams), data }
+          }
         }
       ]
     });
@@ -83,11 +85,63 @@ describe('CaptureComponent', () => {
     const req = httpMock.expectOne(UPLOAD_URL);
     const body = req.request.body as FormData;
     expect(body.get('documentType')).toBe('PASSPORT');
+    expect(body.get('side')).toBe('FRONT');
     expect(body.get('file') instanceof Blob).toBeTrue();
-    req.flush({});
+    req.flush({ documentType: 'PASSPORT', backSideRequired: false, backSideCaptured: false });
 
     expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'review']);
   }));
+
+  it('asks for the back of the card after a CIN front', fakeAsync(() => {
+    setup();
+    sessionLoaded();
+    component.selectType('CIN');
+    pickPhoto();
+
+    component.submit();
+    flush();
+    httpMock.expectOne(UPLOAD_URL).flush({ documentType: 'CIN', backSideRequired: true, backSideCaptured: false });
+
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'capture-back']);
+  }));
+
+  it('goes straight to review after retaking a CIN front whose back is already in', fakeAsync(() => {
+    setup();
+    sessionLoaded('PENDING_REVIEW');
+    component.selectType('CIN');
+    pickPhoto();
+
+    component.submit();
+    flush();
+    httpMock.expectOne(UPLOAD_URL).flush({ documentType: 'CIN', backSideRequired: true, backSideCaptured: true });
+
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'review']);
+  }));
+
+  it('photographs the back of a CIN on the capture-back route', fakeAsync(() => {
+    setup({}, { side: 'BACK' });
+    sessionLoaded('PENDING_REVIEW');
+    expect(component.side).toBe('BACK');
+    expect(component.documentType()).toBe('CIN');
+    expect(fixture.nativeElement.textContent).toContain('Now the back of your ID card');
+    expect(fixture.nativeElement.querySelector('[role=radiogroup]')).toBeNull();
+
+    pickPhoto();
+    component.submit();
+    flush();
+    const req = httpMock.expectOne(UPLOAD_URL);
+    expect((req.request.body as FormData).get('side')).toBe('BACK');
+    expect((req.request.body as FormData).get('documentType')).toBe('CIN');
+    req.flush({ documentType: 'CIN', backSideRequired: true, backSideCaptured: true });
+
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'review']);
+  }));
+
+  it('sends the user to the front first if they open the back step too early', () => {
+    setup({}, { side: 'BACK' });
+    sessionLoaded('CONSENT_GIVEN');
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'capture'], { replaceUrl: true });
+  });
 
   it('asks for a retake when the document could not be read (422)', fakeAsync(() => {
     setup();

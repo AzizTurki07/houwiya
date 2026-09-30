@@ -11,6 +11,10 @@
   } @else {
     @switch (mode()) {
       @case ('choose') {
+        @if (side === 'BACK') {
+          <h1>Now the back of your ID card</h1>
+          <p class="muted">Turn the card over. We read your address, profession and issue date from the back.</p>
+        } @else {
         <h1>Which document will you use?</h1>
 
         <div class="doc-types" role="radiogroup" aria-label="Document type">
@@ -30,6 +34,7 @@
             </button>
           }
         </div>
+        }
 
         @if (documentType(); as type) {
           <section class="card">
@@ -37,6 +42,9 @@
             <ul class="tips">
               @if (type === 'PASSPORT') {
                 <li>Open the passport at the photo page. The two lines of <code>&lt;&lt;&lt;</code> text at the bottom must be fully visible.</li>
+              } @else if (side === 'BACK') {
+                <li>Show the whole back of the card, including the barcode strip at the bottom.</li>
+                <li>Lay the card on a plain, dark surface so its edges stand out.</li>
               } @else {
                 <li>Show the whole front of the card with a small margin around it.</li>
                 <li>Lay the card on a plain, dark surface so its edges stand out.</li>
@@ -67,7 +75,7 @@
       }
 
       @case ('camera') {
-        <h1>Line up your {{ documentType() === 'PASSPORT' ? 'passport photo page' : 'ID card' }}</h1>
+        <h1>Line up {{ documentType() === 'PASSPORT' ? 'your passport photo page' : side === 'BACK' ? 'the back of your ID card' : 'your ID card' }}</h1>
         <div class="viewfinder">
           <video #video autoplay playsinline muted></video>
           <div class="guide" [class.cin]="documentType() === 'CIN'" aria-hidden="true"></div>

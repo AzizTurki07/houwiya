@@ -5,6 +5,7 @@ import com.onboarding.platform.dto.DocumentResponse;
 import com.onboarding.platform.dto.SessionResponse;
 import com.onboarding.platform.entity.OnboardingSession;
 import com.onboarding.platform.entity.User;
+import com.onboarding.platform.enums.DocumentSide;
 import com.onboarding.platform.enums.DocumentType;
 import com.onboarding.platform.security.CurrentUserProvider;
 import com.onboarding.platform.service.DocumentService;
@@ -63,14 +64,16 @@ public class OnboardingController {
 
     /**
      * Sends the photo to the AI service and stores the extracted fields for review.
-     * 422 = unreadable image (prompt a retake); calling this again before confirming replaces the document.
+     * 422 = unreadable image (prompt a retake); calling this again before confirming replaces
+     * that side. A CIN needs a second call with side=BACK (address, issue date).
      */
     @PostMapping(value = "/{id}/document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<DocumentResponse> uploadDocument(@PathVariable UUID id,
                                                            @RequestParam("documentType") DocumentType documentType,
+                                                           @RequestParam(value = "side", defaultValue = "FRONT") DocumentSide side,
                                                            @RequestParam("file") MultipartFile file) {
         User user = currentUserProvider.getCurrentUser();
-        return ResponseEntity.ok(documentService.uploadDocument(id, user, documentType, file));
+        return ResponseEntity.ok(documentService.uploadDocument(id, user, documentType, side, file));
     }
 
     @GetMapping("/{id}/document")

@@ -1,6 +1,7 @@
 package com.onboarding.platform.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.onboarding.platform.enums.DocumentSide;
 import com.onboarding.platform.enums.DocumentType;
 import com.onboarding.platform.exception.AiServiceUnavailableException;
 import com.onboarding.platform.exception.DocumentUnreadableException;
@@ -29,7 +30,7 @@ public class AiServiceClient {
         this.webClient = webClient;
     }
 
-    public JsonNode extract(DocumentType type, byte[] image, String filename, String contentType) {
+    public JsonNode extract(DocumentType type, DocumentSide side, byte[] image, String filename, String contentType) {
         MultipartBodyBuilder body = new MultipartBodyBuilder();
         body.part("image", new ByteArrayResource(image) {
                     @Override
@@ -42,7 +43,7 @@ public class AiServiceClient {
 
         try {
             return webClient.post()
-                    .uri(pathFor(type))
+                    .uri(pathFor(type, side))
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(BodyInserters.fromMultipartData(body.build()))
                     .retrieve()
@@ -61,10 +62,10 @@ public class AiServiceClient {
         }
     }
 
-    private static String pathFor(DocumentType type) {
+    private static String pathFor(DocumentType type, DocumentSide side) {
         return switch (type) {
             case PASSPORT -> "/extract/passport";
-            case CIN -> "/extract/cin";
+            case CIN -> side == DocumentSide.BACK ? "/extract/cin/back" : "/extract/cin";
         };
     }
 

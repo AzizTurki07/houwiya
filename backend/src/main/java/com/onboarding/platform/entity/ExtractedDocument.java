@@ -72,6 +72,12 @@ public class ExtractedDocument {
 
     private Instant confirmedAt;           // set when the user confirms the reviewed fields
 
+    // CIN only: the address/profession/issue date are on the back, a second photo. The
+    // column default keeps `ddl-auto: update` working on tables that already have rows.
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean backSideCaptured = false;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

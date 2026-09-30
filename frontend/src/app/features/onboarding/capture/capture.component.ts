@@ -2,7 +2,7 @@ import { Component, ElementRef, OnDestroy, OnInit, inject, signal, viewChild } f
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { DocumentType } from '../../../core/models/onboarding.model';
+import { DocumentResponse, DocumentSide, DocumentType } from '../../../core/models/onboarding.model';
 import { OnboardingService } from '../../../core/services/onboarding.service';
 import { errorMessage } from '../../../core/utils/http-error';
 import { canvasToJpeg, prepareForUpload } from '../../../core/utils/image';
@@ -35,6 +35,8 @@ export class CaptureComponent implements OnInit, OnDestroy {
   private stream: MediaStream | null = null;
   private uploadSub: Subscription | null = null;
 
+  /** FRONT, or BACK on the capture-back route (CIN only). */
+  readonly side: DocumentSide = this.route.snapshot.data['side'] === 'BACK' ? 'BACK' : 'FRONT';
   readonly labels = DOCUMENT_LABEL;
   readonly documentTypes: DocumentType[] = ['PASSPORT', 'CIN'];
   readonly documentType = signal<DocumentType | null>(null);
@@ -48,7 +50,7 @@ export class CaptureComponent implements OnInit, OnDestroy {
   readonly cameraSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
   ngOnInit(): void {
-    const preselected = this.route.snapshot.queryParamMap.get('type');
+    const preselected = this.side === 'BACK' ? 'CIN' : this.route.snapshot.queryParamMap.get('type');
     if (preselected === 'PASSPORT' || preselected === 'CIN') {
       this.documentType.set(preselected);
     }
@@ -56,7 +58,11 @@ export class CaptureComponent implements OnInit, OnDestroy {
     this.onboarding.getSession(this.sessionId).subscribe({
       next: (session) => {
         // Upload is allowed after consent, and again from review (retake) until the user confirms.
-        if (session.status === 'CONSENT_GIVEN' || session.status === 'PENDING_REVIEW') {
+        // The back needs the front first, which moves the session to PENDING_REVIEW.
+        const allowed = this.side === 'BACK'
+          ? session.status === 'PENDING_REVIEW'
+          : session.status === 'CONSENT_GIVEN' || session.status === 'PENDING_REVIEW';
+        if (allowed) {
           this.ready.set(true);
         } else {
           this.router.navigate(routeForSession(session.id, session.status), { replaceUrl: true });
@@ -171,7 +177,7 @@ export class CaptureComponent implements OnInit, OnDestroy {
     }
 
     const filename = upload.type === 'image/png' ? 'document.png' : 'document.jpg';
-    this.uploadSub = this.onboarding.uploadDocument(this.sessionId, type, upload, filename).subscribe({
+    this.uploadSub = this.onboarding.uploadDocument(this.sessionId, type, upload, filename, this.side).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress && event.total) {
           const pct = Math.round((event.loaded / event.total) * 100);
@@ -180,7 +186,7 @@ export class CaptureComponent implements OnInit, OnDestroy {
             this.mode.set('processing');
           }
         } else if (event.type === HttpEventType.Response) {
-          this.router.navigate(['/onboarding', this.sessionId, 'review']);
+          this.router.navigate(['/onboarding', this.sessionId, this.nextStep(event.body)]);
         }
       },
       error: (err) => {
@@ -188,6 +194,11 @@ export class CaptureComponent implements OnInit, OnDestroy {
         this.error.set(this.toUploadError(err));
       }
     });
+  }
+
+  /** After a CIN front comes its back (unless already captured); everything else goes to review. */
+  private nextStep(doc: DocumentResponse | null): string {
+    return doc?.backSideRequired && !doc.backSideCaptured ? 'capture-back' : 'review';
   }
 
   private toUploadError(err: unknown): UploadError {

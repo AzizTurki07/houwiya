@@ -9,6 +9,7 @@ import com.onboarding.platform.dto.DocumentResponse;
 import com.onboarding.platform.entity.ExtractedDocument;
 import com.onboarding.platform.entity.OnboardingSession;
 import com.onboarding.platform.entity.User;
+import com.onboarding.platform.enums.DocumentSide;
 import com.onboarding.platform.enums.DocumentType;
 import com.onboarding.platform.enums.DocumentWarning;
 import com.onboarding.platform.enums.ReviewStatus;
@@ -33,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,12 +44,17 @@ import java.util.UUID;
  * Status flow: CONSENT_GIVEN --upload--> PENDING_REVIEW --confirm--> APPROVED (clean document)
  * or stays PENDING_REVIEW with ReviewStatus.NEEDS_REVIEW (any warning -> admin queue).
  * Until the user confirms, re-uploading replaces the document (the "retake" path).
+ *
+ * A CIN is two photos: the front creates the document, the back (address, profession, issue
+ * date) is merged into it, and the document can't be confirmed until both are in.
  */
 @Service
 public class DocumentService {
 
     // Keys in the AI service's JSON that are metadata, not user-editable document fields.
-    private static final Set<String> NON_FIELD_KEYS = Set.of("overall_confidence", "checksum_valid");
+    private static final String FIELD_CONFIDENCE_KEY = "field_confidence";
+    private static final String OVERALL_CONFIDENCE_KEY = "overall_confidence";
+    private static final Set<String> NON_FIELD_KEYS = Set.of(OVERALL_CONFIDENCE_KEY, "checksum_valid", FIELD_CONFIDENCE_KEY);
 
     private final OnboardingService onboardingService;
     private final OnboardingSessionRepository sessionRepository;
@@ -73,40 +80,112 @@ public class DocumentService {
         this.minConfidence = minConfidence;
     }
 
-    public DocumentResponse uploadDocument(UUID sessionId, User user, DocumentType type, MultipartFile file) {
+    public DocumentResponse uploadDocument(UUID sessionId, User user, DocumentType type, DocumentSide side,
+                                           MultipartFile file) {
         OnboardingSession session = onboardingService.getOwnedSession(sessionId, user);
         requireUploadAllowed(session);
         validateImage(file);
+        if (side == DocumentSide.BACK) {
+            requireFrontForBack(session, type);
+        }
 
         // Deliberately outside any transaction: OCR can take seconds and shouldn't hold a DB connection.
-        JsonNode extraction = aiServiceClient.extract(type, readBytes(file), file.getOriginalFilename(), file.getContentType());
+        JsonNode extraction = aiServiceClient.extract(type, side, readBytes(file), file.getOriginalFilename(), file.getContentType());
         if (extraction == null || !extraction.isObject()) {
             throw new IllegalStateException("AI service returned an empty extraction result");
         }
 
         return transactionTemplate.execute(status -> {
-            // Retake: replace the previous (unconfirmed) extraction for this session.
-            documentRepository.findBySessionId(session.getId()).ifPresent(existing -> {
-                documentRepository.delete(existing);
-                documentRepository.flush();
-            });
-
-            ExtractedDocument document = ExtractedDocument.builder()
-                    .session(session)
-                    .documentType(type)
-                    .extractedFieldsJson(extraction.toString())
-                    .ocrConfidence(extraction.path("overall_confidence").asDouble(0.0))
-                    .checksumValid(extraction.hasNonNull("checksum_valid") ? extraction.get("checksum_valid").asBoolean() : null)
-                    .build();
-            applyKeyFields(document, (ObjectNode) extraction, false);
+            ExtractedDocument document = side == DocumentSide.BACK
+                    ? mergeBackSide(findDocument(session), (ObjectNode) extraction)
+                    : replaceFrontSide(session, type, (ObjectNode) extraction);
             requireNotDuplicate(document);
-
             document.setReviewStatus(computeWarnings(document).isEmpty() ? ReviewStatus.PENDING : ReviewStatus.NEEDS_REVIEW);
             documentRepository.save(document);
 
             session.setStatus(SessionStatus.PENDING_REVIEW);
             return toResponse(document, sessionRepository.save(session));
         });
+    }
+
+    /** New document from a front photo. Retaking a CIN front keeps a back that was already captured. */
+    private ExtractedDocument replaceFrontSide(OnboardingSession session, DocumentType type, ObjectNode extraction) {
+        ObjectNode fields = extraction.deepCopy();
+        boolean backCaptured = false;
+        Optional<ExtractedDocument> existing = documentRepository.findBySessionId(session.getId());
+        if (existing.isPresent()) {
+            ExtractedDocument previous = existing.get();
+            if (type == DocumentType.CIN && previous.getDocumentType() == DocumentType.CIN && previous.isBackSideCaptured()) {
+                // Keys the new front result doesn't have are the back side's: carry them over.
+                ObjectNode old = readFields(previous);
+                JsonNode oldConfidence = old.path(FIELD_CONFIDENCE_KEY);
+                old.fields().forEachRemaining(e -> {
+                    if (!NON_FIELD_KEYS.contains(e.getKey()) && !fields.has(e.getKey())) {
+                        fields.set(e.getKey(), e.getValue());
+                        if (oldConfidence.has(e.getKey())) {
+                            fields.withObject(FIELD_CONFIDENCE_KEY).set(e.getKey(), oldConfidence.get(e.getKey()));
+                        }
+                    }
+                });
+                backCaptured = true;
+            }
+            // Retake: replace the previous (unconfirmed) extraction for this session.
+            documentRepository.delete(previous);
+            documentRepository.flush();
+        }
+        refreshOverallConfidence(fields);
+
+        ExtractedDocument document = ExtractedDocument.builder()
+                .session(session)
+                .documentType(type)
+                .extractedFieldsJson(fields.toString())
+                .ocrConfidence(fields.path(OVERALL_CONFIDENCE_KEY).asDouble(0.0))
+                .checksumValid(fields.hasNonNull("checksum_valid") ? fields.get("checksum_valid").asBoolean() : null)
+                .backSideCaptured(backCaptured)
+                .build();
+        applyKeyFields(document, fields, false);
+        return document;
+    }
+
+    /** Adds (or, on a retake, replaces) the CIN back-side fields on the existing document. */
+    private ExtractedDocument mergeBackSide(ExtractedDocument document, ObjectNode extraction) {
+        ObjectNode fields = readFields(document);
+        ObjectNode confidence = fields.withObject(FIELD_CONFIDENCE_KEY);
+        extraction.fields().forEachRemaining(e -> {
+            if (!NON_FIELD_KEYS.contains(e.getKey())) {
+                fields.set(e.getKey(), e.getValue());
+            }
+        });
+        extraction.path(FIELD_CONFIDENCE_KEY).fields().forEachRemaining(e -> confidence.set(e.getKey(), e.getValue()));
+        refreshOverallConfidence(fields);
+
+        document.setExtractedFieldsJson(fields.toString());
+        document.setOcrConfidence(fields.path(OVERALL_CONFIDENCE_KEY).asDouble(0.0));
+        document.setBackSideCaptured(true);
+        return document;
+    }
+
+    /**
+     * With per-field scores, the document is as confident as its weakest field -- across both
+     * sides of a CIN. Results without per-field scores keep the AI service's overall value.
+     */
+    private static void refreshOverallConfidence(ObjectNode fields) {
+        Map<String, Double> perField = fieldConfidence(fields);
+        if (!perField.isEmpty()) {
+            fields.put(OVERALL_CONFIDENCE_KEY, perField.values().stream().mapToDouble(Double::doubleValue).min().orElse(0.0));
+        }
+    }
+
+    private void requireFrontForBack(OnboardingSession session, DocumentType type) {
+        if (type != DocumentType.CIN) {
+            throw new IllegalArgumentException("Only the national ID card (CIN) has a back side to photograph");
+        }
+        boolean frontIsCin = documentRepository.findBySessionId(session.getId())
+                .map(doc -> doc.getDocumentType() == DocumentType.CIN)
+                .orElse(false);
+        if (!frontIsCin) {
+            throw new InvalidSessionStateException("Photograph the front of your ID card first");
+        }
     }
 
     public DocumentResponse getDocument(UUID sessionId, User user) {
@@ -121,6 +200,9 @@ public class DocumentService {
             ExtractedDocument document = findDocument(session);
             if (session.getStatus() != SessionStatus.PENDING_REVIEW || document.getConfirmedAt() != null) {
                 throw new InvalidSessionStateException("This document has already been confirmed");
+            }
+            if (backSideRequired(document) && !document.isBackSideCaptured()) {
+                throw new InvalidSessionStateException("Photograph the back of your ID card before confirming");
             }
 
             ObjectNode stored = readFields(document);
@@ -217,7 +299,10 @@ public class DocumentService {
 
     private List<DocumentWarning> computeWarnings(ExtractedDocument document) {
         List<DocumentWarning> warnings = new ArrayList<>();
-        if (document.getOcrConfidence() == null || document.getOcrConfidence() < minConfidence) {
+        // Any single weak field counts: a confidently-read document with one garbled name
+        // must not be auto-approved just because the document-level score looks fine.
+        boolean weakField = fieldConfidence(readFields(document)).values().stream().anyMatch(c -> c < minConfidence);
+        if (document.getOcrConfidence() == null || document.getOcrConfidence() < minConfidence || weakField) {
             warnings.add(DocumentWarning.LOW_CONFIDENCE);
         }
         if (Boolean.FALSE.equals(document.getChecksumValid())) {
@@ -252,6 +337,24 @@ public class DocumentService {
         }
     }
 
+    private static boolean backSideRequired(ExtractedDocument document) {
+        return document.getDocumentType() == DocumentType.CIN;
+    }
+
+    /** Per-field OCR confidence from the AI service; empty for extractions that predate it. */
+    private static Map<String, Double> fieldConfidence(ObjectNode stored) {
+        Map<String, Double> confidence = new LinkedHashMap<>();
+        JsonNode node = stored.path(FIELD_CONFIDENCE_KEY);
+        if (node.isObject()) {
+            node.fields().forEachRemaining(e -> {
+                if (e.getValue().isNumber()) {
+                    confidence.put(e.getKey(), e.getValue().asDouble());
+                }
+            });
+        }
+        return confidence;
+    }
+
     private DocumentResponse toResponse(ExtractedDocument document, OnboardingSession session) {
         Map<String, String> fields = new LinkedHashMap<>();
         ObjectNode stored = readFields(document);
@@ -269,12 +372,15 @@ public class DocumentService {
                 session.getStatus(),
                 document.getDocumentType(),
                 fields,
+                fieldConfidence(stored),
                 document.getDocumentNumber(),
                 document.getDateOfBirth(),
                 document.getExpiryDate(),
                 document.getOcrConfidence(),
                 document.getChecksumValid(),
                 document.isUserCorrected(),
+                backSideRequired(document),
+                document.isBackSideCaptured(),
                 computeWarnings(document),
                 document.getReviewStatus(),
                 document.getConfirmedAt(),

@@ -1,0 +1,5 @@
+# Real identity documents and their ground truth are personal data: never commit them.
+# Only the evaluation code, the example label format and aggregate (value-free) reports are tracked.
+samples/
+labels.json
+out/

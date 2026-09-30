@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   DocumentResponse,
+  DocumentSide,
   DocumentType,
   SessionResponse
 } from '../models/onboarding.model';
@@ -35,10 +36,12 @@ export class OnboardingService {
     id: string,
     documentType: DocumentType,
     image: Blob,
-    filename: string
+    filename: string,
+    side: DocumentSide = 'FRONT'
   ): Observable<HttpEvent<DocumentResponse>> {
     const form = new FormData();
     form.append('documentType', documentType);
+    form.append('side', side);
     form.append('file', image, filename);
     return this.http.post<DocumentResponse>(`${this.base}/${id}/document`, form, {
       reportProgress: true,

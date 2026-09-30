@@ -3,6 +3,7 @@ package com.onboarding.platform.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onboarding.platform.client.AiServiceClient;
+import com.onboarding.platform.enums.DocumentSide;
 import com.onboarding.platform.enums.DocumentType;
 import com.onboarding.platform.exception.DocumentUnreadableException;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,8 @@ class OnboardingDocumentFlowTest {
                 .andExpect(jsonPath("$.sessionStatus").value("PENDING_REVIEW"))
                 .andExpect(jsonPath("$.documentType").value("PASSPORT"))
                 .andExpect(jsonPath("$.fields.surname").value("BENALI"))
+                .andExpect(jsonPath("$.fields.field_confidence").doesNotExist())
+                .andExpect(jsonPath("$.fieldConfidence.surname").value(0.95))
                 .andExpect(jsonPath("$.documentNumber").value("P1000001"))
                 .andExpect(jsonPath("$.warnings", empty()))
                 .andExpect(jsonPath("$.reviewStatus").value("PENDING"));
@@ -95,6 +98,25 @@ class OnboardingDocumentFlowTest {
     }
 
     @Test
+    void singleWeakField_blocksAutoApproval_evenWithHighOverallConfidence() throws Exception {
+        String token = registerAndGetToken();
+        String sessionId = createSessionWithConsent(token);
+        mockPassport("P1000009", 0.95, true, "2031-05-01", Map.of(
+                "document_number", 0.95, "surname", 0.3, "given_names", 0.95, "nationality", 0.95,
+                "date_of_birth", 0.95, "sex", 0.95, "expiry_date", 0.95));
+
+        upload(token, sessionId, "PASSPORT")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fieldConfidence.surname").value(0.3))
+                .andExpect(jsonPath("$.warnings", hasItem("LOW_CONFIDENCE")))
+                .andExpect(jsonPath("$.reviewStatus").value("NEEDS_REVIEW"));
+
+        confirm(token, sessionId, Map.of())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessionStatus").value("PENDING_REVIEW"));
+    }
+
+    @Test
     void userCorrection_isPersistedAndBlocksAutoApproval() throws Exception {
         String token = registerAndGetToken();
         String sessionId = createSessionWithConsent(token);
@@ -119,6 +141,8 @@ class OnboardingDocumentFlowTest {
 
         confirm(token, sessionId, Map.of("favourite_colour", "blue"))
                 .andExpect(status().isBadRequest());
+        confirm(token, sessionId, Map.of("field_confidence", "1.0"))
+                .andExpect(status().isBadRequest());
         confirm(token, sessionId, Map.of("date_of_birth", "11/03/1995"))
                 .andExpect(status().isBadRequest());
     }
@@ -138,7 +162,7 @@ class OnboardingDocumentFlowTest {
     void unreadableImage_returns422_andRetakeWorks() throws Exception {
         String token = registerAndGetToken();
         String sessionId = createSessionWithConsent(token);
-        when(aiServiceClient.extract(eq(DocumentType.PASSPORT), any(), any(), any()))
+        when(aiServiceClient.extract(eq(DocumentType.PASSPORT), any(), any(), any(), any()))
                 .thenThrow(new DocumentUnreadableException("Could not locate a machine-readable zone."));
 
         upload(token, sessionId, "PASSPORT")
@@ -204,9 +228,108 @@ class OnboardingDocumentFlowTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void cin_needsBothSides_andMergesThemIntoOneDocument() throws Exception {
+        String token = registerAndGetToken();
+        String sessionId = createSessionWithConsent(token);
+        mockCinFront("11000001", 0.9);
+        mockCinBack(0.85);
+
+        // Back first is refused: there is no front to attach it to.
+        upload(token, sessionId, "CIN", "BACK").andExpect(status().isConflict());
+
+        upload(token, sessionId, "CIN", "FRONT")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.backSideRequired").value(true))
+                .andExpect(jsonPath("$.backSideCaptured").value(false))
+                .andExpect(jsonPath("$.fields.last_name").value("بن سالم"));
+
+        // Confirming without the back is refused.
+        confirm(token, sessionId, Map.of()).andExpect(status().isConflict());
+
+        upload(token, sessionId, "CIN", "BACK")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.backSideCaptured").value(true))
+                .andExpect(jsonPath("$.fields.last_name").value("بن سالم"))
+                .andExpect(jsonPath("$.fields.address").value("12 نهج الحرية صفاقس"))
+                .andExpect(jsonPath("$.fieldConfidence.address").value(0.85))
+                .andExpect(jsonPath("$.fieldConfidence.last_name").value(0.9))
+                // the document is as confident as its weakest field, across both sides
+                .andExpect(jsonPath("$.ocrConfidence").value(0.85));
+
+        confirm(token, sessionId, Map.of())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessionStatus").value("APPROVED"));
+    }
+
+    @Test
+    void cin_retakingTheFront_keepsTheBack() throws Exception {
+        String token = registerAndGetToken();
+        String sessionId = createSessionWithConsent(token);
+        mockCinFront("11000002", 0.9);
+        mockCinBack(0.85);
+        upload(token, sessionId, "CIN", "FRONT").andExpect(status().isOk());
+        upload(token, sessionId, "CIN", "BACK").andExpect(status().isOk());
+
+        mockCinFront("11000003", 0.95);
+        upload(token, sessionId, "CIN", "FRONT")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.documentNumber").value("11000003"))
+                .andExpect(jsonPath("$.backSideCaptured").value(true))
+                .andExpect(jsonPath("$.fields.address").value("12 نهج الحرية صفاقس"))
+                .andExpect(jsonPath("$.fieldConfidence.address").value(0.85));
+    }
+
+    @Test
+    void passport_hasNoBackSide() throws Exception {
+        String token = registerAndGetToken();
+        String sessionId = createSessionWithConsent(token);
+        mockPassport("P1000010", 0.95, true, "2031-05-01");
+        upload(token, sessionId, "PASSPORT")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.backSideRequired").value(false));
+
+        upload(token, sessionId, "PASSPORT", "BACK").andExpect(status().isBadRequest());
+    }
+
     // --- helpers ---
 
+    private void mockCinFront(String number, double confidence) {
+        Map<String, Object> fields = new java.util.LinkedHashMap<>();
+        fields.put("document_number", number);
+        fields.put("last_name", "بن سالم");
+        fields.put("first_name", "أمين");
+        fields.put("lineage", "بن محمد بن صالح");
+        fields.put("date_of_birth", "1996-09-14");
+        fields.put("place_of_birth", "صفاقس");
+        fields.put("overall_confidence", confidence);
+        fields.put("field_confidence", Map.of(
+                "document_number", confidence, "last_name", confidence, "first_name", confidence,
+                "lineage", confidence, "date_of_birth", confidence, "place_of_birth", confidence));
+        when(aiServiceClient.extract(eq(DocumentType.CIN), eq(DocumentSide.FRONT), any(), any(), any()))
+                .thenReturn(objectMapper.valueToTree(fields));
+    }
+
+    private void mockCinBack(double confidence) {
+        JsonNode result = objectMapper.valueToTree(Map.of(
+                "profession", "مهندس",
+                "address", "12 نهج الحرية صفاقس",
+                "issue_date", "2018-03-03",
+                "overall_confidence", confidence,
+                "field_confidence", Map.of("profession", confidence, "address", confidence, "issue_date", confidence)));
+        when(aiServiceClient.extract(eq(DocumentType.CIN), eq(DocumentSide.BACK), any(), any(), any()))
+                .thenReturn(result);
+    }
+
     private void mockPassport(String number, double confidence, boolean checksumValid, String expiry) {
+        Map<String, Double> perField = Map.of(
+                "document_number", confidence, "surname", confidence, "given_names", confidence,
+                "nationality", confidence, "date_of_birth", confidence, "sex", confidence, "expiry_date", confidence);
+        mockPassport(number, confidence, checksumValid, expiry, perField);
+    }
+
+    private void mockPassport(String number, double confidence, boolean checksumValid, String expiry,
+                              Map<String, Double> fieldConfidence) {
         JsonNode result = objectMapper.valueToTree(Map.of(
                 "document_number", number,
                 "surname", "BENALI",
@@ -216,14 +339,20 @@ class OnboardingDocumentFlowTest {
                 "sex", "M",
                 "expiry_date", expiry,
                 "checksum_valid", checksumValid,
-                "overall_confidence", confidence));
-        when(aiServiceClient.extract(eq(DocumentType.PASSPORT), any(), any(), any())).thenReturn(result);
+                "overall_confidence", confidence,
+                "field_confidence", fieldConfidence));
+        when(aiServiceClient.extract(eq(DocumentType.PASSPORT), any(), any(), any(), any())).thenReturn(result);
     }
 
     private ResultActions upload(String token, String sessionId, String documentType) throws Exception {
+        return upload(token, sessionId, documentType, "FRONT");
+    }
+
+    private ResultActions upload(String token, String sessionId, String documentType, String side) throws Exception {
         return mockMvc.perform(multipart("/api/onboarding/sessions/" + sessionId + "/document")
                 .file(IMAGE)
                 .param("documentType", documentType)
+                .param("side", side)
                 .header("Authorization", "Bearer " + token));
     }
 

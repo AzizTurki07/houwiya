@@ -16,12 +16,19 @@ function cinDocument(overrides: Partial<DocumentResponse> = {}): DocumentRespons
     sessionStatus: 'PENDING_REVIEW',
     documentType: 'CIN',
     fields: {
-      last_name: 'Ben Salah',
-      first_name: 'Amine',
       document_number: '07845213',
+      last_name: 'بن سالم',
+      first_name: 'أمين',
+      lineage: 'بن محمد بن صالح',
       date_of_birth: '1996-09-14',
-      place_of_birth: 'Sfax',
-      address: '12 Rue de la Liberte'
+      place_of_birth: 'صفاقس',
+      profession: 'مهندس',
+      address: '12 نهج الحرية ساقية الزيت صفاقس',
+      issue_date: '2018-03-03'
+    },
+    fieldConfidence: {
+      document_number: 0.9, last_name: 0.9, first_name: 0.9, lineage: 0.9, date_of_birth: 0.9,
+      place_of_birth: 0.9, profession: 0.9, address: 0.9, issue_date: 0.9
     },
     documentNumber: '07845213',
     dateOfBirth: '1996-09-14',
@@ -29,6 +36,8 @@ function cinDocument(overrides: Partial<DocumentResponse> = {}): DocumentRespons
     ocrConfidence: 0.91,
     checksumValid: null,
     userCorrected: false,
+    backSideRequired: true,
+    backSideCaptured: true,
     warnings: [],
     reviewStatus: 'PENDING',
     confirmedAt: null,
@@ -73,8 +82,11 @@ describe('ReviewComponent', () => {
     load(cinDocument());
     const labels = Array.from(fixture.nativeElement.querySelectorAll('.field label') as NodeListOf<HTMLElement>)
       .map((l) => l.textContent!.replace('*', '').trim());
-    expect(labels).toEqual(['Last name', 'First name', 'CIN number', 'Date of birth', 'Place of birth', 'Address']);
-    expect(component.form.controls['first_name'].value).toBe('Amine');
+    expect(labels).toEqual([
+      'CIN number', 'Surname (اللقب)', 'First name (الاسم)', 'Lineage (بن / بنت …)', 'Date of birth',
+      'Place of birth (مكانها)', 'Profession (المهنة)', 'Address (العنوان)', 'Issue date'
+    ]);
+    expect(component.form.controls['first_name'].value).toBe('أمين');
     expect(component.confidenceLevel()).toBe('high');
   });
 
@@ -134,8 +146,48 @@ describe('ReviewComponent', () => {
     expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'result'], { replaceUrl: true });
   });
 
+  it('sends the user to photograph the back when a CIN has only its front', () => {
+    load(cinDocument({ backSideCaptured: false }));
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'capture-back'], { replaceUrl: true });
+  });
+
+  it('offers separate retakes for both sides of a CIN', () => {
+    load(cinDocument());
+    const links = Array.from(fixture.nativeElement.querySelectorAll('a.btn') as NodeListOf<HTMLElement>).map((a) => a.textContent!.trim());
+    expect(links).toContain('Retake front');
+    expect(links).toContain('Retake back');
+  });
+
+  it('renders Arabic values right-to-left', () => {
+    load(cinDocument());
+    expect(fixture.nativeElement.querySelector('#f-last_name').getAttribute('dir')).toBe('rtl');
+    expect(fixture.nativeElement.querySelector('#f-document_number').getAttribute('dir')).toBeNull();
+  });
+
   it('sends the user to take a photo when nothing was uploaded yet', () => {
     httpMock.expectOne(DOC_URL).flush('No document uploaded for this session yet', { status: 404, statusText: 'Not Found' });
     expect(router.navigate).toHaveBeenCalledWith(['/onboarding', SESSION, 'capture'], { replaceUrl: true });
+  });
+
+  it('flags and marks an individual field read with low confidence', () => {
+    load(cinDocument({
+      warnings: ['LOW_CONFIDENCE'],
+      fieldConfidence: { ...cinDocument().fieldConfidence, first_name: 0.42 }
+    }));
+
+    expect(component.flagFor('first_name')).toContain('hard to read');
+    expect(component.flagFor('last_name')).toBeNull();
+    expect(component.fieldLevel('first_name')).toEqual({ level: 'low', pct: 42 });
+    expect(component.fieldLevel('last_name')?.level).toBe('high');
+
+    const dots = fixture.nativeElement.querySelectorAll('.dot.low');
+    expect(dots.length).toBe(1);
+    expect(dots[0].textContent).toContain('42% confidence');
+  });
+
+  it('shows no confidence dot when the backend sent none for a field', () => {
+    load(cinDocument({ fieldConfidence: {} }));
+    expect(component.fieldLevel('first_name')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.dot').length).toBe(0);
   });
 });

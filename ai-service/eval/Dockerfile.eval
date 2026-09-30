@@ -1,0 +1,13 @@
+# Evaluation-only image: the production AI service image plus the extra OCR engines we
+# benchmark against Tesseract. Never deployed -- PaddleOCR alone adds several hundred MB.
+#
+#   docker build -t houwiya-ai ai-service
+#   docker build -t houwiya-ai-eval -f ai-service/eval/Dockerfile.eval ai-service
+FROM houwiya-ai
+
+# PaddleOCR >= 3.7: earlier paddlex releases pin numpy==1.24.4 on Python < 3.12, which
+# breaks matplotlib (pulled in by PassportEye) and the numpy-2 OpenCV of the base image.
+RUN pip install --no-cache-dir paddlepaddle==3.3.1 paddleocr==3.7.0
+
+# Higher-accuracy Tesseract Arabic model, for comparison with the packaged "fast" one.
+ADD https://github.com/tesseract-ocr/tessdata_best/raw/main/ara.traineddata /opt/tessdata_best/ara.traineddata

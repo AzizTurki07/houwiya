@@ -1,11 +1,29 @@
-import os
 import io
+import os
+
+import cv2
 import pytest
 from PIL import Image
 
-from app.cin_extraction import extract_cin_fields, CardNotDetectedError
+from app.arabic_text import fold
+from app.cin_extraction import CardNotDetectedError, extract_cin_back_fields, extract_cin_fields
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+
+# Fictitious values drawn by generate_cin_fixture.py.
+FRONT = {
+    "document_number": "07845213",
+    "last_name": "بن سالم",
+    "first_name": "أمين",
+    "lineage": "بن محمد بن صالح",
+    "date_of_birth": "1996-09-14",
+    "place_of_birth": "صفاقس",
+}
+BACK = {
+    "profession": "مهندس",
+    "address": "12 نهج الحرية ساقية الزيت صفاقس",
+    "issue_date": "2018-03-03",
+}
 
 
 def _read(name: str) -> bytes:
@@ -13,16 +31,32 @@ def _read(name: str) -> bytes:
         return f.read()
 
 
-def test_extracts_valid_synthetic_cin():
-    result = extract_cin_fields(_read("sample_cin.png"))
+def _assert_fields(result, expected):
+    for field, value in expected.items():
+        # fold(): the same letter-variant tolerance (أ/ا, ة/ه ...) the accuracy report uses.
+        assert fold(getattr(result, field) or "") == fold(value), field
+    assert set(result.field_confidence) == set(expected)
+    assert result.overall_confidence == min(result.field_confidence.values())
 
-    assert result.last_name == "Ben Salah"
-    assert result.first_name == "Amine"
-    assert result.date_of_birth == "1996-09-14"
-    assert result.place_of_birth == "Sfax"
-    assert result.document_number == "07845213"
-    assert "LIBERTE" in result.address.upper()
-    assert result.overall_confidence > 0.5
+
+def test_reads_every_field_on_the_front():
+    result = extract_cin_fields(_read("sample_cin_front.png"))
+    _assert_fields(result, FRONT)
+    assert result.field_confidence["document_number"] > 0.8
+
+
+def test_reads_every_field_on_the_back():
+    result = extract_cin_back_fields(_read("sample_cin_back.png"))
+    _assert_fields(result, BACK)
+
+
+def test_reads_an_upside_down_photo():
+    img = cv2.imread(os.path.join(FIXTURE_DIR, "sample_cin_front.png"))
+    ok, buf = cv2.imencode(".png", cv2.rotate(img, cv2.ROTATE_180))
+    assert ok
+    result = extract_cin_fields(buf.tobytes())
+    assert result.document_number == FRONT["document_number"]
+    assert result.date_of_birth == FRONT["date_of_birth"]
 
 
 def test_raises_when_no_card_detected():

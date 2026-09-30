@@ -1,173 +1,287 @@
-import re
-import datetime
-from typing import Optional, Tuple, Dict
+"""
+Tunisian CIN (national ID card) extraction, front and back.
+
+The card is Arabic-only and has a fixed layout, so instead of reading the whole card as
+free text, each field is read from its own horizontal band of the normalised card image:
+
+  1. card_detection finds the card in the photo and warps it to CARD_W x CARD_H.
+  2. For each field band, keep only the "ink": the values are printed in black, while the
+     field labels are purple and the background art is pale or coloured. Dropping every
+     other pixel removes labels, flags, the stamp and the monument drawing before OCR,
+     so the bands can span the full row and tolerate small layout shifts between cards.
+  3. Tesseract reads each band (Arabic, or digits-only for the card number).
+  4. Values are cleaned and validated (8-digit number, parseable date, "بن/بنت" lineage);
+     a value that fails validation keeps its text but gets a low confidence.
+
+Bands were calibrated on real (consented) cards -- see ai-service/eval/ for the labelled
+evaluation set and the accuracy report.
+"""
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Tuple
 
 import cv2
 import numpy as np
 import pytesseract
 
-from app.schemas import CinExtractionResult
+from app.arabic_text import clean, clean_name, parse_arabic_date
+from app.card_detection import CardNotDetectedError, detect_and_crop_card  # noqa: F401 (re-exported)
+from app.schemas import CinBackExtractionResult, CinExtractionResult
 
-# Canonical size we normalize every detected card to, matching the ID-1 card
-# aspect ratio (85.60mm x 53.98mm ~= 1.586:1). Every field region below is
-# calibrated against THIS size -- if you change it, the regions must move too.
-CARD_W = 1000
-CARD_H = 630
+# Same value as the passport pipeline: a field that fails its own validation.
+LOW_FIELD_CONFIDENCE = 0.3
 
-# Value-only regions (label text is deliberately excluded so OCR isn't
-# confused by "Nom:" etc). Calibrated against the current CIN layout -- real
-# cards vary in exact print position, so expect to tune these against a small
-# batch of real (consented) sample cards before trusting this in production.
-FIELD_REGIONS: Dict[str, Tuple[int, int, int, int]] = {
-    "last_name": (420, 150, 950, 205),
-    "first_name": (420, 215, 950, 270),
-    "date_of_birth": (420, 280, 950, 335),
-    "place_of_birth": (420, 345, 950, 400),
-    "document_number": (420, 410, 950, 465),
-    "address": (420, 475, 950, 535),
+# Ink filter thresholds (CIE L*a*b*, 8-bit), measured on real cards: value text is near black
+# (L ~45, chroma ~5); the purple labels are lighter (L 70-95) and violet (a > 0, b < 0).
+INK_MAX_LIGHTNESS = 100
+INK_MAX_CHROMA = 12
+INK_MIN_B_MINUS_A = -8
+# Connected components smaller than this are background specks. Keep it small: Arabic dots
+# are what tell ب/ت/ث/ن/ي apart, and a larger cut-off measurably hurt accuracy.
+MIN_SPECK_AREA = 4
+UPSCALE = 3
+
+
+@dataclass(frozen=True)
+class FieldBand:
+    box: Tuple[int, int, int, int]  # x1, y1, x2, y2 on the CARD_W x CARD_H card
+    kind: str                       # "digits" | "name" | "date" | "text"
+    block: bool = False             # several lines of text (address)
+
+
+# Rows on the normalised front: number under the header, then label/value rows on the right
+# (the photo occupies the left third).
+FRONT_FIELDS: Dict[str, FieldBand] = {
+    "document_number": FieldBand((360, 215, 700, 285), "digits"),
+    "last_name": FieldBand((330, 310, 965, 378), "name"),
+    "first_name": FieldBand((330, 376, 965, 428), "name"),
+    "lineage": FieldBand((330, 424, 965, 480), "name"),
+    "date_of_birth": FieldBand((330, 474, 965, 530), "date"),
+    "place_of_birth": FieldBand((330, 528, 965, 596), "name"),
+}
+
+# Back: text column on the left (the fingerprint box starts around x=675). The first row,
+# the mother's name, is deliberately not read -- verification doesn't need it.
+BACK_FIELDS: Dict[str, FieldBand] = {
+    "profession": FieldBand((300, 135, 668, 198), "name"),
+    "address": FieldBand((25, 198, 668, 325), "text", block=True),
+    "issue_date": FieldBand((25, 335, 480, 395), "date"),
 }
 
 
-class CardNotDetectedError(Exception):
-    """Raised when no card-shaped contour could be located in the image."""
+def ink_image(region: np.ndarray) -> np.ndarray:
+    """Grayscale image with everything except the black value text turned white, upscaled."""
+    lab = cv2.cvtColor(region, cv2.COLOR_BGR2LAB).astype(np.int16)
+    lightness, a, b = lab[..., 0], lab[..., 1] - 128, lab[..., 2] - 128
+    ink = ((lightness < INK_MAX_LIGHTNESS)
+           & (np.sqrt(a * a + b * b) < INK_MAX_CHROMA)
+           & ((b - a) > INK_MIN_B_MINUS_A)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    keep = np.zeros(count, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= MIN_SPECK_AREA
+    # Small marks are only kept near real text: Arabic dots sit right next to their letter,
+    # while stray remnants of a label or the background sit apart (and OCR as phantom digits).
+    big = [i for i in range(1, count) if stats[i, cv2.CC_STAT_AREA] >= 40]
+    if big:
+        x1 = min(stats[i, cv2.CC_STAT_LEFT] for i in big) - 12
+        x2 = max(stats[i, cv2.CC_STAT_LEFT] + stats[i, cv2.CC_STAT_WIDTH] for i in big) + 12
+        for i in range(1, count):
+            left, width = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_WIDTH]
+            if stats[i, cv2.CC_STAT_AREA] < 40 and (left + width < x1 or left > x2):
+                keep[i] = False
+    # Keep the original grey levels of the ink (anti-aliased edges help the LSTM) on white.
+    # Growing the mask must not pull the violet label pixels next to a value back in.
+    violet = ((a - b) > 8) & (np.sqrt(a * a + b * b) > 8)
+    mask = cv2.dilate(keep[labels].astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool) & ~violet
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    out = np.full_like(gray, 255)
+    out[mask] = gray[mask]
+    # Tesseract reads a line most reliably when it is tightly framed by a white margin:
+    # text touching the edge, or a wide empty stretch beside it, causes dropped/phantom glyphs.
+    ys, xs = np.nonzero(mask)
+    if len(xs):
+        out = out[max(0, ys.min() - 4):ys.max() + 5, max(0, xs.min() - 4):xs.max() + 5]
+    out = cv2.resize(out, None, fx=UPSCALE, fy=UPSCALE, interpolation=cv2.INTER_CUBIC)
+    return cv2.copyMakeBorder(out, 24, 24, 24, 24, cv2.BORDER_CONSTANT, value=255)
 
 
-def _order_corners(pts: np.ndarray) -> np.ndarray:
-    """Order 4 points as top-left, top-right, bottom-right, bottom-left."""
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    return rect
+def field_images(card: np.ndarray, fields: Dict[str, FieldBand]) -> Dict[str, np.ndarray]:
+    """Preprocessed image per field; the evaluation harness feeds these to other OCR engines."""
+    return {name: ink_image(card[y1:y2, x1:x2]) for name, (x1, y1, x2, y2) in
+            ((n, f.box) for n, f in fields.items())}
 
 
-def detect_and_crop_card(image_bytes: bytes) -> np.ndarray:
-    """
-    Finds the largest 4-cornered contour in the image (assumed to be the
-    card against a plain background), perspective-corrects it, and returns
-    it warped to the canonical CARD_W x CARD_H size.
-    """
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise CardNotDetectedError("Could not decode the uploaded image.")
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 50, 150)
-    edged = cv2.dilate(edged, np.ones((5, 5), np.uint8), iterations=1)
-
-    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
-
-    image_area = img.shape[0] * img.shape[1]
-    card_contour = None
-    for c in contours:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4 and cv2.contourArea(approx) > 0.15 * image_area:
-            card_contour = approx
-            break
-
-    if card_contour is None:
-        raise CardNotDetectedError(
-            "Could not detect the card outline. Retake the photo with the card "
-            "flat, fully in frame, against a plain contrasting background."
-        )
-
-    pts = card_contour.reshape(4, 2).astype("float32")
-    ordered = _order_corners(pts)
-    dst = np.array(
-        [[0, 0], [CARD_W - 1, 0], [CARD_W - 1, CARD_H - 1], [0, CARD_H - 1]],
-        dtype="float32",
-    )
-    matrix = cv2.getPerspectiveTransform(ordered, dst)
-    return cv2.warpPerspective(img, matrix, (CARD_W, CARD_H))
-
-
-def _ocr_region(region: np.ndarray, lang: str = "fra") -> Tuple[str, float]:
-    """OCRs a single field region and returns (text, average_word_confidence)."""
-    upscaled = cv2.resize(region, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    data = pytesseract.image_to_data(thresh, lang=lang, output_type=pytesseract.Output.DICT)
-
-    words, confidences = [], []
-    for i, word in enumerate(data["text"]):
-        word = word.strip()
+def _ocr_words(image: np.ndarray, lang: str, config: str):
+    """Tesseract words as (text, confidence 0-100, (left, top, width, height), line key)."""
+    data = pytesseract.image_to_data(image, lang=lang, config=config, output_type=pytesseract.Output.DICT)
+    words = []
+    for i, text in enumerate(data["text"]):
+        text = text.strip()
         try:
-            conf = int(data["conf"][i])
-        except (ValueError, TypeError):
+            conf = float(data["conf"][i])
+        except (TypeError, ValueError):
             conf = -1
-        if word and conf >= 0:
-            words.append(word)
-            confidences.append(conf)
-
-    text = " ".join(words)
-    avg_conf = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.0
-    return text, avg_conf
+        if text and conf >= 0:
+            box = (data["left"][i], data["top"][i], data["width"][i], data["height"][i])
+            words.append((text, conf, box, (data["block_num"][i], data["par_num"][i], data["line_num"][i])))
+    return words
 
 
-def _parse_ddmmyyyy(raw: str) -> Optional[str]:
-    match = re.search(r"(\d{1,2})\D(\d{1,2})\D(\d{4})", raw)
-    if not match:
-        return None
-    day, month, year = (int(g) for g in match.groups())
-    try:
-        return datetime.date(year, month, day).isoformat()
-    except ValueError:
-        return None
+def _join(words) -> Tuple[str, float]:
+    lines: Dict[Tuple[int, int, int], list] = {}
+    for text, _, _, line in words:
+        lines.setdefault(line, []).append(text)
+    text = " ".join(" ".join(ws) for _, ws in sorted(lines.items()))
+    confs = [w[1] for w in words]
+    return text, (sum(confs) / len(confs) / 100.0) if confs else 0.0
 
 
-def _clean_document_number(raw: str) -> Optional[str]:
-    digits = re.sub(r"\D", "", raw)
-    return digits or None
+_DIGITS_ONLY = "-c tessedit_char_whitelist=0123456789"
 
 
-def extract_cin_fields(image_bytes: bytes, lang: str = "fra") -> CinExtractionResult:
+def _reread_digits(image: np.ndarray, words):
     """
-    Full CIN pipeline: detect+crop the card, OCR each pre-defined field
-    region independently, validate/parse each value, and roll per-field
-    confidence up into one overall_confidence (the minimum across fields --
-    a single badly-read field should be enough to flag the whole document
-    for manual review, not get averaged away by the fields that read fine).
-
-    `lang` defaults to French only, since that's what this pipeline has been
-    verified against here (synthetic fixture, Latin script only). Real CIN
-    cards are bilingual Arabic/French -- try lang="fra+ara" against real
-    (consented) sample cards and compare accuracy before relying on it.
+    The Arabic model is unreliable on the Latin digits inside a date ("26" -> "6"), so every
+    word it saw digits in is re-read on its own with the digits-only English model.
     """
-    warped = detect_and_crop_card(image_bytes)
+    fixed = []
+    for text, conf, (left, top, width, height), line in words:
+        if any(c.isdigit() for c in text):
+            # The Arabic model's box around a number is often too tight (it clips a leading
+            # "1"), so widen it a little -- too much and it picks up the next letter as a "0".
+            pad = max(6, height // 4)
+            crop = image[max(0, top - 6):top + height + 6, max(0, left - pad):left + width + pad]
+            crop = cv2.copyMakeBorder(crop, 16, 16, 16, 16, cv2.BORDER_CONSTANT, value=255)
+            digits = _join(_ocr_words(crop, "eng", f"--psm 8 {_DIGITS_ONLY}"))
+            if digits[0]:
+                text, conf = digits[0], digits[1] * 100
+        fixed.append((text, conf, (left, top, width, height), line))
+    return fixed
 
-    texts: Dict[str, str] = {}
-    confidences: Dict[str, float] = {}
-    for field, (x1, y1, x2, y2) in FIELD_REGIONS.items():
-        region = warped[y1:y2, x1:x2]
-        text, conf = _ocr_region(region, lang=lang)
-        texts[field] = text
-        confidences[field] = conf
 
-    document_number = _clean_document_number(texts["document_number"])
-    if document_number and not re.fullmatch(r"\d{8}", document_number):
-        # Tunisian CIN numbers are 8 digits -- doesn't match, flag it.
-        confidences["document_number"] = min(confidences["document_number"], 0.3)
+def split_lines(image: np.ndarray):
+    """
+    Split a multi-line field image into one image per text line, using the rows that
+    contain ink. Tesseract's own block layout (psm 6) tended to silently drop a line.
+    """
+    # A row counts as a gap if it is *nearly* empty: descenders of one line often reach
+    # into the next, so perfectly empty rows between Arabic lines are rare.
+    ink_per_row = (image < 128).sum(axis=1)
+    rows = ink_per_row > 0.03 * ink_per_row.max() if ink_per_row.max() else ink_per_row > 0
+    runs, start = [], None
+    for y, has_ink in enumerate(rows):
+        if has_ink and start is None:
+            start = y
+        elif not has_ink and start is not None:
+            runs.append([start, y])
+            start = None
+    if start is not None:
+        runs.append([start, len(rows)])
+    if not runs:
+        return []
+    tallest = max(end - begin for begin, end in runs)
+    # Dots above/below a line leave small gaps: merge runs closer than a quarter line.
+    merged = [runs[0]]
+    for begin, end in runs[1:]:
+        if begin - merged[-1][1] < 0.25 * tallest:
+            merged[-1][1] = end
+        else:
+            merged.append([begin, end])
+    tallest = max(end - begin for begin, end in merged)
+    return [cv2.copyMakeBorder(image[begin:end], 24, 24, 0, 0, cv2.BORDER_CONSTANT, value=255)
+            for begin, end in merged
+            if end - begin >= 0.5 * tallest]  # slivers of the neighbouring rows' text
 
-    date_of_birth = _parse_ddmmyyyy(texts["date_of_birth"])
-    if texts["date_of_birth"] and not date_of_birth:
-        confidences["date_of_birth"] = min(confidences["date_of_birth"], 0.3)
 
-    overall_confidence = min(confidences.values()) if confidences else 0.0
+def _read_line(image: np.ndarray, kind: str) -> Tuple[str, float]:
+    # Digits inside Arabic text are always re-read with the digit model.
+    if kind == "date":
+        # The raw-line mode tends to fuse the day with neighbouring glyphs ("02" -> "12").
+        return _join(_reread_digits(image, _ocr_words(image, "ara", "--psm 7")))
+    # psm 7 (line) and 13 (raw line) fail on different inputs -- short one-word values
+    # especially -- so read both and keep the one Tesseract is more confident in.
+    return max((_join(_reread_digits(image, _ocr_words(image, "ara", f"--psm {psm}"))) for psm in (7, 13)),
+               key=lambda r: r[1])
 
+
+def tesseract_read(image: np.ndarray, band: FieldBand) -> Tuple[str, float]:
+    """(text, mean word confidence 0-1) for one field image."""
+    if band.kind == "digits":
+        return _join(_ocr_words(image, "eng", f"--psm 7 {_DIGITS_ONLY}"))
+    lines = split_lines(image) if band.block else [image]
+    reads = [r for r in (_read_line(line, band.kind) for line in lines) if r[0]]
+    if not reads:
+        return "", 0.0
+    return " ".join(text for text, _ in reads), sum(conf for _, conf in reads) / len(reads)
+
+
+def parse_value(field: str, band: FieldBand, raw: str) -> Tuple[Optional[str], bool]:
+    """(value to return, passed validation). Invalid values are still returned for review."""
+    if band.kind == "digits":
+        digits = "".join(c for c in raw if c.isdigit())
+        return digits or None, len(digits) == 8
+    if band.kind == "date":
+        parsed = parse_arabic_date(raw)
+        return parsed, parsed is not None
+    value = clean_name(raw) if band.kind == "name" else clean(raw)
+    if not value:
+        return None, False
+    if field == "lineage":
+        # "بن ..." (son of) or "بنت ..." (daughter of).
+        return value, value.split()[0] in ("بن", "بنت")
+    return value, True
+
+
+Reader = Callable[[np.ndarray, FieldBand], Tuple[str, float]]
+
+
+def read_fields(card: np.ndarray, fields: Dict[str, FieldBand], reader: Reader = tesseract_read):
+    """Returns ({field: value}, {field: confidence}, number of fields that validated)."""
+    values, confidences, valid_count = {}, {}, 0
+    for name, image in field_images(card, fields).items():
+        band = fields[name]
+        raw, conf = reader(image, band)
+        value, valid = parse_value(name, band, raw)
+        if value is None:
+            conf = 0.0
+        elif not valid:
+            conf = min(conf, LOW_FIELD_CONFIDENCE)
+        values[name] = value
+        confidences[name] = round(conf, 2)
+        valid_count += valid
+    return values, confidences, valid_count
+
+
+def _read_card(image_bytes: bytes, fields: Dict[str, FieldBand], key_field: str, reader: Reader):
+    card = detect_and_crop_card(image_bytes)
+    values, confidences, valid = read_fields(card, fields, reader)
+    if not _key_ok(values, confidences, key_field):
+        # Upside-down photo is the common mistake: try the card rotated 180 degrees.
+        rotated = read_fields(cv2.rotate(card, cv2.ROTATE_180), fields, reader)
+        if rotated[2] > valid:
+            values, confidences, valid = rotated
+    return values, confidences
+
+
+def _key_ok(values, confidences, key_field) -> bool:
+    return values.get(key_field) is not None and confidences.get(key_field, 0) > LOW_FIELD_CONFIDENCE
+
+
+def extract_cin_fields(image_bytes: bytes, reader: Reader = tesseract_read) -> CinExtractionResult:
+    """Front side. Raises CardNotDetectedError if no card outline can be found."""
+    values, confidences = _read_card(image_bytes, FRONT_FIELDS, "document_number", reader)
     return CinExtractionResult(
-        document_number=document_number,
-        last_name=texts["last_name"].strip().title() or None,
-        first_name=texts["first_name"].strip().title() or None,
-        date_of_birth=date_of_birth,
-        place_of_birth=texts["place_of_birth"].strip().title() or None,
-        address=texts["address"].strip() or None,
-        overall_confidence=round(overall_confidence, 2),
+        **values,
+        # The weakest field decides: one badly read field should send the document to review.
+        overall_confidence=min(confidences.values()),
+        field_confidence=confidences,
+    )
+
+
+def extract_cin_back_fields(image_bytes: bytes, reader: Reader = tesseract_read) -> CinBackExtractionResult:
+    """Back side. Raises CardNotDetectedError if no card outline can be found."""
+    values, confidences = _read_card(image_bytes, BACK_FIELDS, "issue_date", reader)
+    return CinBackExtractionResult(
+        **values,
+        overall_confidence=min(confidences.values()),
+        field_confidence=confidences,
     )

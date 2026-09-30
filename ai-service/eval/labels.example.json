@@ -1,0 +1,39 @@
+{
+  "_comment": "Copy to labels.json (git-ignored) and describe your own consented samples in eval/samples/. Values below are fictitious.",
+  "samples": [
+    {
+      "file": "cin_front_01.jpg",
+      "kind": "cin_front",
+      "fields": {
+        "document_number": "01234567",
+        "last_name": "بن علي",
+        "first_name": "سامي",
+        "lineage": "بن محمد بن صالح",
+        "date_of_birth": "1995-03-11",
+        "place_of_birth": "صفاقس"
+      }
+    },
+    {
+      "file": "cin_back_01.jpg",
+      "kind": "cin_back",
+      "fields": {
+        "profession": "مهندس",
+        "address": "12 نهج الحرية صفاقس",
+        "issue_date": "2018-06-01"
+      }
+    },
+    {
+      "file": "passport_01.jpg",
+      "kind": "passport",
+      "fields": {
+        "document_number": "PT4021988",
+        "surname": "BENALI",
+        "given_names": "SAMI",
+        "nationality": "TUN",
+        "date_of_birth": "1995-03-11",
+        "sex": "M",
+        "expiry_date": "2030-01-01"
+      }
+    }
+  ]
+}

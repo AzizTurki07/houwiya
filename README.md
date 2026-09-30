@@ -7,12 +7,12 @@ an AI/OCR microservice. See the project roadmap for the full phase-by-phase plan
 
 ```
 backend/       Spring Boot API (auth, onboarding sessions, persistence)
-ai-service/    Python FastAPI microservice (OCR/extraction - currently stubbed)
+ai-service/    Python FastAPI microservice (passport MRZ + Tunisian CIN OCR)
 frontend/      Angular app (capture UI, review screen, admin dashboard)
 docker-compose.yml
 ```
 
-## Current status (Phase 5 backend wiring done)
+## Current status (Phases 2-5; Phase 4 accuracy work ongoing)
 
 - Backend: entities (`User`, `OnboardingSession`, `ExtractedDocument`), JWT auth
   (`/api/auth/register`, `/api/auth/login`), and the full onboarding flow wired to the
@@ -22,12 +22,12 @@ docker-compose.yml
   |---|---|
   | `POST /api/onboarding/sessions` | create a session (`STARTED`) |
   | `POST /api/onboarding/sessions/{id}/consent` | record consent (`CONSENT_GIVEN`) |
-  | `POST /api/onboarding/sessions/{id}/document` | multipart `file` + `documentType` (`PASSPORT`/`CIN`) -> calls `/extract/passport` or `/extract/cin`, persists the result, session -> `PENDING_REVIEW`. Re-upload before confirming = retake (replaces the document) |
-  | `GET  /api/onboarding/sessions/{id}/document` | extracted fields + `ocrConfidence`, `checksumValid`, `warnings` for the review screen |
-  | `POST /api/onboarding/sessions/{id}/confirm` | `{"fields": {...}}` with the user's reviewed values -> auto-approved if clean, otherwise `NEEDS_REVIEW` for an admin |
+  | `POST /api/onboarding/sessions/{id}/document` | multipart `file` + `documentType` (`PASSPORT`/`CIN`) + optional `side` (`FRONT` default, `BACK` for the CIN) -> calls the matching `/extract/...` endpoint, persists the result, session -> `PENDING_REVIEW`. The CIN back is merged into the same document; re-upload before confirming = retake of that side |
+  | `GET  /api/onboarding/sessions/{id}/document` | extracted fields + `fieldConfidence`, `ocrConfidence`, `checksumValid`, `warnings`, `backSideRequired`/`backSideCaptured` for the review screen |
+  | `POST /api/onboarding/sessions/{id}/confirm` | `{"fields": {...}}` with the user's reviewed values -> auto-approved if clean, otherwise `NEEDS_REVIEW` for an admin. A CIN needs both sides first (`409` otherwise) |
 
-  Warnings that block auto-approval: `LOW_CONFIDENCE` (< `app.review.min-confidence`,
-  default 0.7), `CHECKSUM_FAILED`, `MISSING_REQUIRED_FIELDS`, `DOCUMENT_EXPIRED`,
+  Warnings that block auto-approval: `LOW_CONFIDENCE` (overall **or any single
+  field** below `app.review.min-confidence`, default 0.7), `CHECKSUM_FAILED`, `MISSING_REQUIRED_FIELDS`, `DOCUMENT_EXPIRED`,
   `USER_CORRECTED`. A document number already used by another application is rejected
   with `409`. Error codes: `422` unreadable image (prompt a retake), `502` AI service
   down/timeout, `404` session not found or not yours, `409` wrong session state.
@@ -35,22 +35,32 @@ docker-compose.yml
   > If your local Postgres already has an `extracted_document` table from an earlier
   > run, drop it (or `docker compose down -v`): `extracted_fields_json` changed from
   > `oid` to `text`, which `ddl-auto: update` won't migrate.
-- AI service: FastAPI with **both** real extraction pipelines.
-  - `/extract/passport` uses PassportEye (locates + crops + OCRs the MRZ),
-    returns ISO dates and a `checksum_valid` flag from the ICAO check digits,
-    and responds `422` if no MRZ is found.
-  - `/extract/cin` detects and perspective-corrects the card with OpenCV, then
-    OCRs six pre-defined field regions independently (Tesseract, French by
-    default -- see the docstring in `cin_extraction.py` for why bilingual
-    `fra+ara` needs testing against real cards), validates the document number
-    format and date parsing, and responds `422` if no card outline is found.
-  - Both pipelines verified against synthetic test fixtures in this sandbox --
-    `pytest tests/ -v` passes all 4 tests (2 passport, 2 CIN).
+- AI service: FastAPI with both pipelines, evaluated on real (consented) documents --
+  see [ai-service/eval/REPORT.md](ai-service/eval/REPORT.md) and
+  [ai-service/eval/README.md](ai-service/eval/README.md) for numbers and findings.
+  - `/extract/passport`: PassportEye locates + OCRs the MRZ; ISO dates, `checksum_valid`
+    from the ICAO check digits, `422` if no MRZ is found.
+  - `/extract/cin` (front) and `/extract/cin/back`: the real card is Arabic-only. The card
+    is found in hand-held photos (fingers over corners, card cut by the frame --
+    `card_detection.py`), warped to a canonical size, and each field is read from its own
+    row band after an "ink filter" keeps only the black value text (the purple labels,
+    background art and stamp are dropped). Dates with Arabic month names
+    ("02 اكتوبر 2001") are parsed, digits are re-read with a digits-only model, an
+    upside-down photo is retried rotated. Front: number, surname, first name, lineage,
+    date/place of birth. Back: profession, address, issue date (the mother's name is
+    deliberately not extracted). `422` if no card is found.
+  - Every result carries a `field_confidence` map (0-1 per field); a field that fails its
+    own validation (check digit, 8-digit number, date) is capped at 0.3.
+  - Tests (39): synthetic CIN front/back fixtures in the real layout
+    (`tests/generate_cin_fixture.py`, fictitious data), card detection with a thumb over a
+    corner / card off the frame, Arabic date parsing, passport per-field rules and the
+    expiry-century regression.
 - Frontend: Angular 18, full end-to-end flow (lazy-loaded standalone components):
   sign in / register -> my verifications -> consent -> choose passport or CIN ->
   live camera with a document guide (or upload a photo) -> upload progress + "reading
   your document" state -> **editable review screen** (reading-quality meter, fields
-  highlighted from the backend `warnings`, per-field validation such as 8-digit CIN
+  highlighted from the backend `warnings`, a per-field confidence marker with any
+  individually hard-to-read field flagged, per-field validation such as 8-digit CIN
   numbers) -> confirm -> verified / submitted-for-review result. A `422` from the AI
   service shows a retake prompt with tips; a `502` offers to retry the same photo;
   an expired JWT signs the user out and returns them to login.
@@ -59,14 +69,11 @@ docker-compose.yml
   behind a Codespaces forwarded URL.
 
 ### Running the AI service tests
+OCR results depend on the exact Tesseract build, so tests run inside the service image
+(this is also what CI does):
 ```bash
-cd ai-service
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# tesseract-ocr must also be installed as a system package, e.g.:
-#   apt install tesseract-ocr   (Linux)
-#   brew install tesseract      (Mac)
-pytest tests/ -v
+docker build -t houwiya-ai ai-service
+docker run --rm houwiya-ai python -m pytest tests/ -v
 ```
 
 ## Running in GitHub Codespaces
@@ -145,7 +152,7 @@ per service, each only triggering when that service's folder changes:
 | Workflow | What it does |
 |---|---|
 | `backend-ci.yml` | JDK 21 + Maven, runs `mvn test` against an in-memory H2 database (no Postgres needed in CI), then builds the jar |
-| `ai-service-ci.yml` | Installs Tesseract + French/Arabic language packs via apt, installs the pip requirements, runs `pytest tests/ -v` (both the passport MRZ and CIN tests) |
+| `ai-service-ci.yml` | Builds the production AI service image (Tesseract + fra/ara, layer-cached) and runs `pytest` inside it, so CI tests exactly what ships |
 | `frontend-ci.yml` | `npm ci`, `ng build`, then runs the Karma unit tests headless (`ubuntu-latest` runners ship Chrome pre-installed, which `karma-chrome-launcher` picks up automatically) |
 
 **To get this running:**
@@ -167,13 +174,15 @@ repo path:
 ![Frontend CI](https://github.com/<your-username>/<your-repo>/actions/workflows/frontend-ci.yml/badge.svg)
 ```
 
-**What's actually verified vs. what to double check:**
-- `ai-service-ci.yml` steps were run and passed in this build's sandbox exactly as written (apt install + pip install + pytest) — high confidence this works as-is.
-- `backend-ci.yml` could NOT be run here (no Maven Central network access in this sandbox) — the tests themselves (`PlatformApplicationTests`, `AuthControllerTest`) are new, so run `mvn test` locally at least once before you trust the CI green check.
-- `frontend-ci.yml`'s build step was verified locally; the Karma/ChromeHeadless test step could not be, since this sandbox has no Chrome/Chromium available to install. This is a very standard pattern on GitHub's `ubuntu-latest` runners, but keep an eye on the first run.
+**Verified locally:** backend `mvn test` (18 tests, H2), frontend build + Karma headless
+(40 tests), and the AI service tests run inside the freshly built image exactly as the
+workflow does (39 tests). The Buildx layer cache (`type=gha`) only exists on GitHub, so the
+first CI run of the AI workflow builds the image from scratch (a few minutes).
 
 ## Next steps
 
-- Per-field confidence from the AI service, so the review screen can highlight
-  individual fields instead of only the document as a whole.
+- Grow the CIN evaluation set to 10-20 consented cards (`ai-service/eval/README.md`) and
+  re-run the Tesseract vs PaddleOCR comparison on it; current numbers come from one card.
+- Reduce "confident but wrong" reads (Tesseract's confidence is poorly calibrated on
+  Arabic names), e.g. by cross-checking the CIN number against the back's barcode.
 - Admin review queue for `NEEDS_REVIEW` documents.

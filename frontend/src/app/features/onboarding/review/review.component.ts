@@ -4,11 +4,16 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DocumentResponse } from '../../../core/models/onboarding.model';
 import { OnboardingService } from '../../../core/services/onboarding.service';
 import { errorMessage } from '../../../core/utils/http-error';
-import { DOCUMENT_NOUN, FieldSpec, WARNING_TEXT, fieldSpecsFor, flaggedFields } from '../document-fields';
+import {
+  ConfidenceLevel,
+  DOCUMENT_NOUN,
+  FieldSpec,
+  WARNING_TEXT,
+  confidenceLevel,
+  fieldSpecsFor,
+  flaggedFields
+} from '../document-fields';
 import { StepsComponent } from '../steps.component';
-
-/** Matches app.review.min-confidence on the backend: below this, the document goes to manual review. */
-const REVIEW_THRESHOLD = 0.7;
 
 @Component({
   selector: 'app-review',
@@ -34,10 +39,7 @@ export class ReviewComponent implements OnInit {
   readonly warningText = WARNING_TEXT;
 
   /** high / medium / low, for the confidence meter. */
-  readonly confidenceLevel = computed(() => {
-    const c = this.document()?.ocrConfidence ?? 0;
-    return c >= 0.85 ? 'high' : c >= REVIEW_THRESHOLD ? 'medium' : 'low';
-  });
+  readonly confidenceLevel = computed(() => confidenceLevel(this.document()?.ocrConfidence ?? 0));
   readonly confidencePct = computed(() => Math.round((this.document()?.ocrConfidence ?? 0) * 100));
 
   ngOnInit(): void {
@@ -45,6 +47,10 @@ export class ReviewComponent implements OnInit {
       next: (doc) => {
         if (doc.confirmedAt) {
           this.router.navigate(['/onboarding', this.sessionId, 'result'], { replaceUrl: true });
+          return;
+        }
+        if (doc.backSideRequired && !doc.backSideCaptured) {
+          this.router.navigate(['/onboarding', this.sessionId, 'capture-back'], { replaceUrl: true });
           return;
         }
         this.setDocument(doc);
@@ -71,8 +77,18 @@ export class ReviewComponent implements OnInit {
     }
     this.form = new FormGroup(controls);
     this.specs.set(specs);
-    this.flags.set(flaggedFields(doc.warnings, doc.fields, specs));
+    this.flags.set(flaggedFields(doc.warnings, doc.fields, specs, doc.fieldConfidence ?? {}));
     this.document.set(doc);
+  }
+
+  /** Per-field reading confidence for the dot next to each label; null when unknown or the field is empty. */
+  fieldLevel(key: string): { level: ConfidenceLevel; pct: number } | null {
+    const doc = this.document();
+    const confidence = doc?.fieldConfidence?.[key];
+    if (confidence === undefined || !doc?.fields[key]) {
+      return null;
+    }
+    return { level: confidenceLevel(confidence), pct: Math.round(confidence * 100) };
   }
 
   showError(key: string): boolean {

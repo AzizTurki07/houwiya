@@ -1,0 +1,7 @@
+# Real identity documents used for evaluation must never enter an image or build context.
+eval/samples/
+eval/labels.json
+eval/out/
+.venv/
+**/__pycache__/
+.pytest_cache/

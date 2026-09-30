@@ -16,29 +16,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: ai-service
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # Tests run inside the production image rather than on the runner: OCR output depends
+      # on the exact Tesseract build and language data, so this tests what actually ships
+      # (and matches `docker compose` / Codespaces runs exactly).
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build AI service image
+        uses: docker/build-push-action@v6
         with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: ai-service/requirements.txt
-
-      - name: Install Tesseract + language packs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-fra tesseract-ocr-ara libgl1
-
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+          context: ai-service
+          tags: houwiya-ai:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Run tests
-        env:
-          PYTHONPATH: .
-        run: pytest tests/ -v
+        run: docker run --rm houwiya-ai:ci python -m pytest tests/ -v
