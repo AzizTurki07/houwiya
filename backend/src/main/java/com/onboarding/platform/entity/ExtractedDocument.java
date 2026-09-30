@@ -49,7 +49,9 @@ public class ExtractedDocument {
     // Raw JSON blob of all fields the AI service returned (name, place of birth, etc).
     // Keeping this as text instead of a rigid column-per-field schema, since CIN and
     // passport extract different field sets.
-    @Lob
+    // TEXT rather than @Lob: on Postgres, Hibernate maps @Lob String to an `oid` large
+    // object, which can't be read outside a transaction.
+    @Column(columnDefinition = "TEXT")
     private String extractedFieldsJson;
 
     private Double ocrConfidence;          // 0.0 - 1.0, lowest per-field confidence
@@ -61,6 +63,14 @@ public class ExtractedDocument {
     @Column(nullable = false)
     @Builder.Default
     private ReviewStatus reviewStatus = ReviewStatus.PENDING;
+
+    // True once the user edits any extracted value on the review screen. Edited documents
+    // are never auto-approved -- an admin has to compare them against the image.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean userCorrected = false;
+
+    private Instant confirmedAt;           // set when the user confirms the reviewed fields
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

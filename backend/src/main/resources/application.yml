@@ -12,6 +12,10 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
@@ -33,6 +37,10 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}   # 24h
   ai-service:
     base-url: ${AI_SERVICE_URL:http://localhost:8000}
+    timeout-seconds: ${AI_SERVICE_TIMEOUT_SECONDS:60}   # OCR on a large photo can take a few seconds
+  review:
+    # Below this OCR confidence, a document can't be auto-approved and goes to the admin queue.
+    min-confidence: ${REVIEW_MIN_CONFIDENCE:0.7}
 
 springdoc:
   swagger-ui:

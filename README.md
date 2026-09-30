@@ -12,14 +12,29 @@ frontend/      Angular app (capture UI, review screen, admin dashboard)
 docker-compose.yml
 ```
 
-## Current status (end of Phase 3)
+## Current status (Phase 5 backend wiring done)
 
 - Backend: entities (`User`, `OnboardingSession`, `ExtractedDocument`), JWT auth
-  (`/api/auth/register`, `/api/auth/login`), session lifecycle endpoints
-  (`/api/onboarding/sessions`) with consent tracking, plus a context-load test
-  and a real auth integration test (register/login/duplicate-email/wrong-password)
-  against in-memory H2. It does NOT yet call the AI service to persist
-  extraction results -- that wiring is Phase 5.
+  (`/api/auth/register`, `/api/auth/login`), and the full onboarding flow wired to the
+  AI service over `WebClient`:
+
+  | Endpoint | What it does |
+  |---|---|
+  | `POST /api/onboarding/sessions` | create a session (`STARTED`) |
+  | `POST /api/onboarding/sessions/{id}/consent` | record consent (`CONSENT_GIVEN`) |
+  | `POST /api/onboarding/sessions/{id}/document` | multipart `file` + `documentType` (`PASSPORT`/`CIN`) -> calls `/extract/passport` or `/extract/cin`, persists the result, session -> `PENDING_REVIEW`. Re-upload before confirming = retake (replaces the document) |
+  | `GET  /api/onboarding/sessions/{id}/document` | extracted fields + `ocrConfidence`, `checksumValid`, `warnings` for the review screen |
+  | `POST /api/onboarding/sessions/{id}/confirm` | `{"fields": {...}}` with the user's reviewed values -> auto-approved if clean, otherwise `NEEDS_REVIEW` for an admin |
+
+  Warnings that block auto-approval: `LOW_CONFIDENCE` (< `app.review.min-confidence`,
+  default 0.7), `CHECKSUM_FAILED`, `MISSING_REQUIRED_FIELDS`, `DOCUMENT_EXPIRED`,
+  `USER_CORRECTED`. A document number already used by another application is rejected
+  with `409`. Error codes: `422` unreadable image (prompt a retake), `502` AI service
+  down/timeout, `404` session not found or not yours, `409` wrong session state.
+  Covered by `OnboardingDocumentFlowTest` (AI client mocked) plus the auth tests.
+  > If your local Postgres already has an `extracted_document` table from an earlier
+  > run, drop it (or `docker compose down -v`): `extracted_fields_json` changed from
+  > `oid` to `text`, which `ddl-auto: update` won't migrate.
 - AI service: FastAPI with **both** real extraction pipelines.
   - `/extract/passport` uses PassportEye (locates + crops + OCRs the MRZ),
     returns ISO dates and a `checksum_valid` flag from the ICAO check digits,
@@ -124,10 +139,10 @@ repo path:
 - `backend-ci.yml` could NOT be run here (no Maven Central network access in this sandbox) — the tests themselves (`PlatformApplicationTests`, `AuthControllerTest`) are new, so run `mvn test` locally at least once before you trust the CI green check.
 - `frontend-ci.yml`'s build step was verified locally; the Karma/ChromeHeadless test step could not be, since this sandbox has no Chrome/Chromium available to install. This is a very standard pattern on GitHub's `ubuntu-latest` runners, but keep an eye on the first run.
 
-## Next steps (Phase 4/5 of the roadmap)
+## Next steps
 
-Wire the backend to actually call the AI service: on document upload, the
-Spring Boot `OnboardingController` should call `/extract/passport` or
-`/extract/cin`, persist the result into `ExtractedDocument`, and move the
-session into `PENDING_REVIEW`. That's also when the duplicate-document-number
-and expiry checks discussed earlier fit in.
+- Phase 5 frontend: Angular screens for capture -> upload -> loading -> editable review
+  (driven by `warnings` / `ocrConfidence`) -> confirm, with a retake prompt on `422`.
+- Per-field confidence from the AI service, so the review screen can highlight
+  individual fields instead of only the document as a whole.
+- Admin review queue for `NEEDS_REVIEW` documents.

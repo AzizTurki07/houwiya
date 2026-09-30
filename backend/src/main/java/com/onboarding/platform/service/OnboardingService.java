@@ -3,6 +3,7 @@ package com.onboarding.platform.service;
 import com.onboarding.platform.entity.OnboardingSession;
 import com.onboarding.platform.entity.User;
 import com.onboarding.platform.enums.SessionStatus;
+import com.onboarding.platform.exception.ResourceNotFoundException;
 import com.onboarding.platform.repository.OnboardingSessionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,10 @@ public class OnboardingService {
 
     public OnboardingSession giveConsent(UUID sessionId, User user) {
         OnboardingSession session = getOwnedSession(sessionId, user);
+        // Idempotent: re-consenting must not rewind a session that has already moved on.
+        if (session.isConsentGiven()) {
+            return session;
+        }
         session.setConsentGiven(true);
         session.setConsentTimestamp(Instant.now());
         session.setStatus(SessionStatus.CONSENT_GIVEN);
@@ -35,12 +40,10 @@ public class OnboardingService {
     }
 
     public OnboardingSession getOwnedSession(UUID sessionId, User user) {
-        OnboardingSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
-        if (!session.getUser().getId().equals(user.getId())) {
-            throw new IllegalArgumentException("Session does not belong to this user");
-        }
-        return session;
+        // Same 404 for "doesn't exist" and "not yours", so other users' session IDs can't be probed.
+        return sessionRepository.findById(sessionId)
+                .filter(session -> session.getUser().getId().equals(user.getId()))
+                .orElseThrow(() -> new ResourceNotFoundException("Session not found: " + sessionId));
     }
 
     public List<OnboardingSession> listForUser(User user) {
