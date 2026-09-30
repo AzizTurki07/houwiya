@@ -46,11 +46,23 @@ describe('authInterceptor', () => {
     auth.isAuthenticated.set(true);
 
     http.get('/api/onboarding/sessions').subscribe({ error: () => undefined });
-    httpMock.expectOne('/api/onboarding/sessions').flush('', { status: 403, statusText: 'Forbidden' });
+    httpMock.expectOne('/api/onboarding/sessions').flush('', { status: 401, statusText: 'Unauthorized' });
 
     expect(auth.isAuthenticated()).toBeFalse();
     expect(localStorage.getItem('onboarding_token')).toBeNull();
     expect(router.navigate).toHaveBeenCalledWith(['/login'], jasmine.objectContaining({}));
+  });
+
+  it('does not sign out on 403: signed in, just not allowed', () => {
+    localStorage.setItem('onboarding_token', 'abc');
+    const auth = TestBed.inject(AuthService);
+    auth.isAuthenticated.set(true);
+
+    http.get('/api/admin/reviews').subscribe({ error: () => undefined });
+    httpMock.expectOne('/api/admin/reviews').flush('', { status: 403, statusText: 'Forbidden' });
+
+    expect(auth.isAuthenticated()).toBeTrue();
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 
   it('leaves failed logins to the login page', () => {

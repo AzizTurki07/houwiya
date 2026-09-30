@@ -54,6 +54,14 @@ public class OnboardingController {
         return ResponseEntity.ok(SessionResponse.from(session));
     }
 
+    /** Deletes the session with its document and photos (the applicant's right to erasure). */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteSession(@PathVariable UUID id) {
+        User user = currentUserProvider.getCurrentUser();
+        documentService.deleteSession(id, user);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     public ResponseEntity<List<SessionResponse>> listMySessions() {
         User user = currentUserProvider.getCurrentUser();

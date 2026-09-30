@@ -34,6 +34,8 @@ public record DocumentResponse(
         boolean backSideCaptured,
         List<DocumentWarning> warnings,
         ReviewStatus reviewStatus,
+        /** Why an admin rejected the document; null unless reviewStatus is REJECTED. */
+        String decisionReason,
         Instant confirmedAt,
         Instant createdAt
 ) {}

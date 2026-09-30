@@ -19,9 +19,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   return next(authReq).pipe(
     catchError((err: unknown) => {
       // Expired/invalid token (the JWT lasts 24h): drop it and send the user to sign in again.
+      // Only 401 means that -- a 403 is "signed in, but not allowed" and must not log out.
       // Login/register failures are 401s too, but those pages show their own error.
       const isAuthCall = req.url.startsWith(`${environment.apiUrl}/auth/`);
-      if (err instanceof HttpErrorResponse && (err.status === 401 || err.status === 403) && token && !isAuthCall) {
+      if (err instanceof HttpErrorResponse && err.status === 401 && token && !isAuthCall) {
         auth.logout();
         router.navigate(['/login'], { queryParams: { returnUrl: router.url, expired: 1 } });
       }

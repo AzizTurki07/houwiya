@@ -20,6 +20,17 @@
   text-decoration: none;
 }
 
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  .active {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+}
+
 .logo {
   display: grid;
   place-items: center;

@@ -12,7 +12,7 @@ frontend/      Angular app (capture UI, review screen, admin dashboard)
 docker-compose.yml
 ```
 
-## Current status (Phases 2-5; Phase 4 accuracy work ongoing)
+## Current status (Phases 2-5 + data protection; Phase 4 accuracy work ongoing)
 
 - Backend: entities (`User`, `OnboardingSession`, `ExtractedDocument`), JWT auth
   (`/api/auth/register`, `/api/auth/login`), and the full onboarding flow wired to the
@@ -76,6 +76,53 @@ docker build -t houwiya-ai ai-service
 docker run --rm houwiya-ai python -m pytest tests/ -v
 ```
 
+## Admin review queue
+
+Documents that can't be auto-approved (any warning: low confidence, failed checksum,
+expired, edited by the applicant...) wait in a review queue once the applicant confirms.
+An admin sees the photos, every extracted field with its confidence, and exactly what the
+applicant changed compared with what the OCR read, then approves or rejects with a reason
+the applicant sees (and is e-mailed, once `MAIL_ENABLED=true` and `spring.mail.*` are set).
+
+Registration only creates applicant accounts. The admin account comes from configuration:
+
+```bash
+export ADMIN_EMAIL=you@example.com
+export ADMIN_PASSWORD='at-least-12-characters'
+```
+
+Start the backend with those set; sign in with them and a **Review queue** link appears.
+The password is only used to create the account, never to overwrite it later.
+
+Duplicate rule: a document number already used by another person is refused. The same
+person may apply again with the same document only after a rejection.
+
+## Security and data protection
+
+| Measure | How |
+|---|---|
+| Encryption at rest | Document number, date of birth, all extracted fields and the pre-correction values are AES-256-GCM encrypted by the application (`FieldEncryptor`) before they reach Postgres. Duplicate detection uses a keyed HMAC of the number, so no number is stored in clear. |
+| Photo retention | Photos are stored (encrypted) only so a reviewer can see flagged documents. They are deleted when a document is auto-approved, when an admin decides, when the applicant deletes the verification, and in any case after 30 days (`app.retention.image-days`, daily clean-up). |
+| Right to erasure | Applicants can delete any of their verifications (document, fields and photos) from the app. |
+| Audit trail | Registrations, logins (incl. failures), uploads, confirmations, deletions, every admin view of a document or photo, and every decision are logged with who and when -- never with document values. Admins can read it at `/admin/audit`. |
+| Rate limiting | 10 login/register attempts per minute per IP; 30 document uploads per hour per user (`429` + `Retry-After`). |
+| Access control | JWT; roles are re-read on every request; `/api/admin/**` needs ADMIN. No token or an invalid one is `401`, not allowed is `403`. |
+| Schema | Managed by Flyway migrations (`backend/src/main/resources/db/migration`); Hibernate only validates. |
+
+Relevant for the report: Tunisia's personal-data law (Organic Law 2004-63) requires
+consent, purpose limitation, and security of processing -- covered here by the consent
+step, not extracting data verification doesn't need (e.g. the mother's name on the CIN),
+the retention rules above, encryption and the audit trail.
+
+**Keys and secrets.** `APP_ENCRYPTION_KEY` (base64, 32 bytes: `openssl rand -base64 32`) and
+`JWT_SECRET` have public development defaults so the project runs out of the box; the
+backend logs a warning while the dev encryption key is in use. Set your own before handling
+real documents, and keep the key safe: losing it makes the encrypted data unreadable.
+
+**Upgrading an existing dev database.** The schema is now created by Flyway, which refuses
+to take over tables Hibernate created earlier. Reset the local database once:
+`docker compose down -v` (this deletes local dev data).
+
 ## Running in GitHub Codespaces
 
 The repo has a dev container (`.devcontainer/`) with JDK 21 + Maven, Node 20,
@@ -87,6 +134,7 @@ Then, one terminal each:
 docker compose up -d postgres ai-service
 ```
 ```bash
+export ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='choose-12+-characters'
 cd backend && mvn spring-boot:run
 ```
 ```bash
@@ -174,8 +222,8 @@ repo path:
 ![Frontend CI](https://github.com/<your-username>/<your-repo>/actions/workflows/frontend-ci.yml/badge.svg)
 ```
 
-**Verified locally:** backend `mvn test` (18 tests, H2), frontend build + Karma headless
-(40 tests), and the AI service tests run inside the freshly built image exactly as the
+**Verified locally:** backend `mvn test` (41 tests, H2 + Flyway), frontend build + Karma headless
+(53 tests), and the AI service tests run inside the freshly built image exactly as the
 workflow does (39 tests). The Buildx layer cache (`type=gha`) only exists on GitHub, so the
 first CI run of the AI workflow builds the image from scratch (a few minutes).
 
@@ -185,4 +233,6 @@ first CI run of the AI workflow builds the image from scratch (a few minutes).
   re-run the Tesseract vs PaddleOCR comparison on it; current numbers come from one card.
 - Reduce "confident but wrong" reads (Tesseract's confidence is poorly calibrated on
   Arabic names), e.g. by cross-checking the CIN number against the back's barcode.
-- Admin review queue for `NEEDS_REVIEW` documents.
+- Selfie face match + liveness against the document photo.
+- Mobile app (Capacitor, Phase 6).
+- Key rotation for `APP_ENCRYPTION_KEY` (the `v1:` prefix on stored values leaves room).

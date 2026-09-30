@@ -35,6 +35,12 @@ services:
       DB_PASSWORD: onboarding
       AI_SERVICE_URL: http://localhost:8000
       JWT_SECRET: dev-only-secret-change-before-any-real-use
+      # Personal data at rest is encrypted with this key. The fallback is the PUBLIC dev key
+      # from application.yml -- export your own (openssl rand -base64 32) for real data.
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-REVWLU9OTFktS0VZLW5ldmVyLXVzZS1mb3ItcmVhbCE=}
+      # Export these in your shell to get an admin account (review queue) at startup.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,0 +1,118 @@
+<main class="page wide">
+  <a class="btn link back" routerLink="/admin">← Review queue</a>
+
+  @if (detail(); as d) {
+    <div class="row">
+      <h1>{{ d.applicantEmail }}</h1>
+      <span class="spacer"></span>
+      <span class="chip"
+            [class.warning]="d.reviewStatus === 'NEEDS_REVIEW'"
+            [class.success]="d.reviewStatus === 'APPROVED'"
+            [class.danger]="d.reviewStatus === 'REJECTED'">
+        {{ d.reviewStatus === 'NEEDS_REVIEW' ? 'To review' : d.reviewStatus === 'APPROVED' ? 'Approved' : 'Rejected' }}
+      </span>
+    </div>
+    <p class="muted">
+      {{ documentLabel[d.documentType] }} · submitted {{ d.submittedAt | date: 'medium' }}
+      @if (d.checksumValid === true) { · <span class="ok">MRZ check digits valid</span> }
+      @if (d.checksumValid === false) { · <span class="bad">MRZ check digits failed</span> }
+    </p>
+
+    @if (justDecided()) {
+      <div class="alert success" role="status">
+        Decision recorded. The applicant has been notified and the document photos were deleted.
+      </div>
+    }
+
+    @if (d.warnings.length) {
+      <div class="alert warning">
+        <strong>Why this needs a human</strong>
+        <ul>
+          @for (w of d.warnings; track w) {
+            <li>{{ warningText[w] }}</li>
+          }
+        </ul>
+      </div>
+    }
+
+    <div class="layout">
+      <section class="card photos" aria-label="Document photos">
+        <h2>Photos</h2>
+        @if (d.imageSides.length === 0) {
+          <p class="muted small">No photos stored: they are deleted once a decision is made.</p>
+        }
+        @for (photo of photos(); track photo.side) {
+          <figure>
+            <img [src]="photo.url" [alt]="'Document ' + photo.side.toLowerCase() + ' side'" />
+            <figcaption class="muted small">{{ photo.side === 'FRONT' ? 'Front' : 'Back' }}</figcaption>
+          </figure>
+        }
+      </section>
+
+      <section class="card" aria-label="Extracted details">
+        <h2>Details</h2>
+        <table class="fields">
+          <tbody>
+            @for (row of rows(); track row.spec.key) {
+              <tr [class.changed]="row.changed">
+                <th scope="row">
+                  {{ row.spec.label }}
+                  @if (row.confidence; as c) {
+                    <span class="dot {{ c.level }}" [title]="'Read with ' + c.pct + '% confidence'">
+                      <span class="visually-hidden">Read with {{ c.pct }}% confidence</span>
+                    </span>
+                  }
+                </th>
+                <td>
+                  <span [attr.dir]="row.spec.rtl ? 'rtl' : null">{{ row.value ?? '—' }}</span>
+                  @if (row.changed) {
+                    <div class="was small">
+                      Changed by applicant. OCR read:
+                      <span [attr.dir]="row.spec.rtl ? 'rtl' : null">{{ row.original ?? '(nothing)' }}</span>
+                    </div>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    @if (d.reviewStatus === 'NEEDS_REVIEW') {
+      <section class="card decision" aria-label="Decision">
+        <h2>Decision</h2>
+        <div class="field">
+          <label for="reason">Reason (required to reject, shown to the applicant)</label>
+          <textarea id="reason" rows="3" maxlength="1000" [(ngModel)]="reason"
+                    placeholder="e.g. The photo is too blurry to read the name."></textarea>
+        </div>
+        @if (decisionError()) {
+          <div class="alert error" role="alert">{{ decisionError() }}</div>
+        }
+        <div class="row end">
+          <button class="btn danger" type="button" (click)="decide('REJECT')" [disabled]="deciding() !== null">
+            {{ deciding() === 'REJECT' ? 'Rejecting…' : 'Reject' }}
+          </button>
+          <button class="btn primary" type="button" (click)="decide('APPROVE')" [disabled]="deciding() !== null">
+            {{ deciding() === 'APPROVE' ? 'Approving…' : 'Approve' }}
+          </button>
+        </div>
+      </section>
+    } @else {
+      <section class="card">
+        <h2>Decision</h2>
+        <p>{{ d.reviewStatus === 'APPROVED' ? 'Approved' : 'Rejected' }} by {{ d.reviewedBy }} on {{ d.reviewedAt | date: 'medium' }}.</p>
+        @if (d.decisionReason) {
+          <p class="muted">Reason: {{ d.decisionReason }}</p>
+        }
+      </section>
+    }
+
+    <a class="btn link" routerLink="/admin/audit" [queryParams]="{ target: d.documentId }">Audit trail for this document</a>
+  } @else if (error()) {
+    <div class="alert error" role="alert">{{ error() }}</div>
+  } @else {
+    <p class="muted" aria-live="polite">Loading…</p>
+  }
+</main>

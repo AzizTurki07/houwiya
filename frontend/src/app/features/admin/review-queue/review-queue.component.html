@@ -1,0 +1,68 @@
+<main class="page wide">
+  <div class="row">
+    <h1>Review queue</h1>
+    <span class="spacer"></span>
+    <a class="btn link" routerLink="/admin/audit">Audit trail</a>
+  </div>
+  <p class="muted">
+    Documents applicants have submitted that couldn't be verified automatically.
+    Opening one is recorded in the audit trail.
+  </p>
+
+  <div class="tabs" role="tablist" aria-label="Review status">
+    @for (tab of tabs; track tab.status) {
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [class.active]="status() === tab.status"
+        [attr.aria-selected]="status() === tab.status"
+        (click)="select(tab.status)"
+      >
+        {{ tab.label }}
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <div class="alert error" role="alert">{{ error() }}</div>
+  } @else if (items() === null) {
+    <p class="muted" aria-live="polite">Loading…</p>
+  } @else if (items()!.length === 0) {
+    <section class="card empty">
+      <p class="muted">
+        {{ status() === 'NEEDS_REVIEW' ? 'Nothing to review. Every submitted document has been decided.' : 'No documents here yet.' }}
+      </p>
+    </section>
+  } @else {
+    <ul class="list">
+      @for (item of items(); track item.documentId) {
+        <li>
+          <a class="card item" [routerLink]="['/admin/reviews', item.documentId]">
+            <div class="who">
+              <div class="title">{{ item.applicantEmail }}</div>
+              <div class="muted small">
+                {{ documentLabel[item.documentType] }} · submitted {{ item.submittedAt | date: 'short' }}
+                @if (item.reviewedBy) {
+                  · decided by {{ item.reviewedBy }} {{ item.reviewedAt | date: 'short' }}
+                }
+              </div>
+              @if (item.warnings.length) {
+                <div class="chips">
+                  @for (w of item.warnings; track w) {
+                    <span class="chip warning" [title]="warningText[w]">{{ warningShort[w] }}</span>
+                  }
+                </div>
+              }
+            </div>
+            @if (item.ocrConfidence !== null) {
+              <span class="confidence" [class.low]="item.ocrConfidence < 0.7" title="Weakest field's reading confidence">
+                {{ item.ocrConfidence * 100 | number: '1.0-0' }}%
+              </span>
+            }
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</main>

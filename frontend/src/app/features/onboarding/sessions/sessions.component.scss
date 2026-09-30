@@ -8,6 +8,32 @@
   margin: 0;
 }
 
+.entry {
+  margin-bottom: 10px;
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.delete {
+  display: block;
+  margin: 2px 0 0 auto;
+  min-height: 32px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .item {
   display: flex;
   align-items: center;
@@ -15,7 +41,7 @@
   gap: 12px;
   color: inherit;
   text-decoration: none;
-  margin-bottom: 10px;
+  margin-bottom: 0;
   padding: 16px;
 }
 

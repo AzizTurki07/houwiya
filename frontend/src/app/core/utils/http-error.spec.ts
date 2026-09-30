@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { errorMessage } from './http-error';
 
 describe('errorMessage', () => {
@@ -10,6 +10,13 @@ describe('errorMessage', () => {
   it('uses a JSON detail/message when present', () => {
     expect(errorMessage(new HttpErrorResponse({ status: 422, error: { detail: 'No MRZ' } }))).toBe('No MRZ');
     expect(errorMessage(new HttpErrorResponse({ status: 400, error: { message: 'Bad' } }))).toBe('Bad');
+  });
+
+  it('explains rate limiting using Retry-After', () => {
+    const withHeader = new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'Retry-After': '42' }) });
+    expect(errorMessage(withHeader)).toBe('Too many attempts. Please wait 42 seconds and try again.');
+    const minutes = new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'Retry-After': '600' }) });
+    expect(errorMessage(minutes)).toContain('10 minutes');
   });
 
   it('explains network failures', () => {

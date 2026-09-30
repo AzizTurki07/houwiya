@@ -50,6 +50,8 @@ export interface DocumentResponse {
   backSideCaptured: boolean;
   warnings: DocumentWarning[];
   reviewStatus: ReviewStatus;
+  /** Why an admin rejected it; only set when rejected. */
+  decisionReason: string | null;
   confirmedAt: string | null;
   createdAt: string;
 }

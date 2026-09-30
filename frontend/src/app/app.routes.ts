@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, guestGuard } from './core/guards/auth.guard';
+import { adminGuard, authGuard, guestGuard } from './core/guards/auth.guard';
 
 // Screens are lazy-loaded so the first paint (login) stays small -- matters on phones (Phase 6).
 export const routes: Routes = [
@@ -62,6 +62,28 @@ export const routes: Routes = [
           import('./features/onboarding/result/result.component').then((m) => m.ResultComponent)
       },
       { path: '', pathMatch: 'full', redirectTo: 'consent' }
+    ]
+  },
+  {
+    path: 'admin',
+    canActivate: [adminGuard],
+    children: [
+      {
+        path: '',
+        pathMatch: 'full',
+        title: 'Review queue · Houwiya',
+        loadComponent: () => import('./features/admin/review-queue/review-queue.component').then((m) => m.ReviewQueueComponent)
+      },
+      {
+        path: 'reviews/:documentId',
+        title: 'Review · Houwiya',
+        loadComponent: () => import('./features/admin/review-detail/review-detail.component').then((m) => m.ReviewDetailComponent)
+      },
+      {
+        path: 'audit',
+        title: 'Audit trail · Houwiya',
+        loadComponent: () => import('./features/admin/audit-log/audit-log.component').then((m) => m.AuditLogComponent)
+      }
     ]
   },
   { path: '**', redirectTo: '' }

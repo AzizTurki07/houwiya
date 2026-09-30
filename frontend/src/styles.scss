@@ -82,6 +82,11 @@ a { color: var(--primary); }
   padding: 24px 16px 48px;
 }
 
+/* Admin screens hold tables and photos side by side. */
+.page.wide {
+  max-width: 1080px;
+}
+
 .muted { color: var(--text-muted); }
 .small { font-size: 0.875rem; }
 

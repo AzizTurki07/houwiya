@@ -116,6 +116,24 @@ export const WARNING_TEXT: Record<DocumentWarning, string> = {
   USER_CORRECTED: 'You corrected some of the extracted details.'
 };
 
+/** The same warnings, worded for a reviewer rather than the applicant. */
+export const WARNING_ADMIN_TEXT: Record<DocumentWarning, string> = {
+  LOW_CONFIDENCE: 'At least one field was read with low confidence (marked below).',
+  CHECKSUM_FAILED: "The passport's machine-readable zone failed its check digits.",
+  MISSING_REQUIRED_FIELDS: 'Required details (number, date of birth or expiry) could not be read.',
+  DOCUMENT_EXPIRED: 'The document is expired.',
+  USER_CORRECTED: 'The applicant changed extracted values (highlighted below).'
+};
+
+/** Compact labels for chips (admin queue). */
+export const WARNING_SHORT: Record<DocumentWarning, string> = {
+  LOW_CONFIDENCE: 'Low confidence',
+  CHECKSUM_FAILED: 'Checksum failed',
+  MISSING_REQUIRED_FIELDS: 'Missing fields',
+  DOCUMENT_EXPIRED: 'Expired',
+  USER_CORRECTED: 'Edited by applicant'
+};
+
 export const DOCUMENT_LABEL: Record<DocumentType, string> = {
   PASSPORT: 'Passport',
   CIN: 'National ID card (CIN)'

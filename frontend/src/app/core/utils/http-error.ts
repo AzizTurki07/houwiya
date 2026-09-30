@@ -12,6 +12,12 @@ export function errorMessage(err: unknown, fallback = 'Something went wrong. Ple
   if (err.status === 0) {
     return "Can't reach the server. Check your connection and try again.";
   }
+  if (err.status === 429) {
+    const wait = Number(err.headers?.get('Retry-After'));
+    return wait > 0
+      ? `Too many attempts. Please wait ${wait < 90 ? `${wait} seconds` : `${Math.ceil(wait / 60)} minutes`} and try again.`
+      : 'Too many attempts. Please wait a moment and try again.';
+  }
   const body = err.error;
   if (typeof body === 'string' && body.trim() && !body.trim().startsWith('<')) {
     return body.trim();

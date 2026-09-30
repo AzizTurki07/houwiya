@@ -27,6 +27,11 @@ export class OnboardingService {
     return this.http.get<SessionResponse>(`${this.base}/${id}`);
   }
 
+  /** Deletes the verification with its document and photos. */
+  deleteSession(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/${id}`);
+  }
+
   giveConsent(id: string): Observable<SessionResponse> {
     return this.http.post<SessionResponse>(`${this.base}/${id}/consent`, null);
   }

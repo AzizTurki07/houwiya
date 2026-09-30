@@ -13,6 +13,12 @@
           <div class="badge danger" aria-hidden="true">✕</div>
           <h1>Verification unsuccessful</h1>
           <p class="muted">We couldn't verify your identity with this document. You can start a new verification.</p>
+          @if (doc.decisionReason) {
+            <div class="reasons">
+              <p class="small"><strong>Reason given by our reviewer:</strong></p>
+              <p class="small">{{ doc.decisionReason }}</p>
+            </div>
+          }
         }
         @default {
           <div class="badge warning" aria-hidden="true">⏳</div>

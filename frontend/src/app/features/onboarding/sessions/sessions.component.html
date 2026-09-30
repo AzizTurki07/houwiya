@@ -22,7 +22,7 @@
   } @else {
     <ul class="list">
       @for (s of sessions(); track s.id) {
-        <li>
+        <li class="entry">
           <a class="card item" [routerLink]="routeFor(s.id, s.status)">
             <div>
               <div class="title">Verification · {{ s.createdAt | date: 'mediumDate' }}</div>
@@ -30,8 +30,25 @@
             </div>
             <span class="chip {{ statusLabel[s.status].tone }}">{{ statusLabel[s.status].text }}</span>
           </a>
+          @if (confirmingDelete() === s.id) {
+            <div class="confirm" role="group" aria-label="Confirm deletion">
+              <span class="small">Delete this verification and all its data?</span>
+              <button class="btn link" type="button" (click)="confirmingDelete.set(null)">Keep</button>
+              <button class="btn danger" type="button" (click)="remove(s.id)" [disabled]="deleting() === s.id">
+                {{ deleting() === s.id ? 'Deleting…' : 'Delete' }}
+              </button>
+            </div>
+          } @else {
+            <button class="btn link delete" type="button" (click)="confirmingDelete.set(s.id)"
+                    [attr.aria-label]="'Delete verification from ' + (s.createdAt | date: 'mediumDate')">
+              Delete
+            </button>
+          }
         </li>
       }
     </ul>
+    <p class="muted small">
+      Deleting removes the verification, the details read from your document and any stored photos.
+    </p>
   }
 </main>

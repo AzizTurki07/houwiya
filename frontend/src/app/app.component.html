@@ -4,7 +4,12 @@
       <span class="logo" aria-hidden="true">H</span>
       Houwiya
     </a>
-    <button class="btn link" type="button" (click)="logout()">Sign out</button>
+    <nav class="nav">
+      @if (auth.role() === 'ADMIN') {
+        <a class="btn link" routerLink="/admin" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: false }">Review queue</a>
+      }
+      <button class="btn link" type="button" (click)="logout()">Sign out</button>
+    </nav>
   </header>
 }
 <router-outlet />

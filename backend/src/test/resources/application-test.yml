@@ -6,7 +6,9 @@ spring:
     password:
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # Flyway builds the schema in tests too (H2 in PostgreSQL mode), so the migrations are
+      # exercised on every run. Type validation is left to the real Postgres at startup.
+      ddl-auto: none
     database-platform: org.hibernate.dialect.H2Dialect
   mail:
     host: localhost
@@ -18,3 +20,12 @@ app:
     expiration-ms: 3600000
   ai-service:
     base-url: http://localhost:8000
+  crypto:
+    key: VEVTVC1PTkxZLUtFWS1ub3QtZm9yLXJlYWwtdXNlISE=
+  admin:
+    email: admin@test.local
+    password: admin-test-password
+  rate-limit:
+    # High enough that ordinary tests never trip it; RateLimitTest overrides these.
+    auth-per-minute: 10000
+    uploads-per-hour: 10000

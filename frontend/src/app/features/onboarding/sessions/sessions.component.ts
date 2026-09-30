@@ -20,6 +20,9 @@ export class SessionsComponent implements OnInit {
   readonly sessions = signal<SessionResponse[] | null>(null);
   readonly error = signal<string | null>(null);
   readonly starting = signal(false);
+  /** Session id awaiting a second click to confirm deletion. */
+  readonly confirmingDelete = signal<string | null>(null);
+  readonly deleting = signal<string | null>(null);
   readonly statusLabel = STATUS_LABEL;
   readonly routeFor = routeForSession;
 
@@ -27,6 +30,22 @@ export class SessionsComponent implements OnInit {
     this.onboarding.listSessions().subscribe({
       next: (list) => this.sessions.set([...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt))),
       error: (err) => this.error.set(errorMessage(err, "Couldn't load your verifications."))
+    });
+  }
+
+  remove(id: string): void {
+    this.deleting.set(id);
+    this.error.set(null);
+    this.onboarding.deleteSession(id).subscribe({
+      next: () => {
+        this.sessions.update((list) => (list ?? []).filter((s) => s.id !== id));
+        this.deleting.set(null);
+        this.confirmingDelete.set(null);
+      },
+      error: (err) => {
+        this.deleting.set(null);
+        this.error.set(errorMessage(err, "Couldn't delete this verification."));
+      }
     });
   }
 

@@ -10,11 +10,11 @@ import java.util.UUID;
 
 public interface ExtractedDocumentRepository extends JpaRepository<ExtractedDocument, UUID> {
 
-    // Backs the duplicate-applicant check in Phase 5 (week 5 of the roadmap).
-    Optional<ExtractedDocument> findByDocumentNumber(String documentNumber);
+    // Duplicate-applicant check: the number itself is encrypted, so match on its keyed hash.
+    List<ExtractedDocument> findByDocumentNumberHash(String documentNumberHash);
 
-    // Backs the admin review queue in Phase 5 (week 6).
-    List<ExtractedDocument> findByReviewStatus(ReviewStatus reviewStatus);
+    // Admin queue: documents the applicant has submitted, oldest first.
+    List<ExtractedDocument> findByReviewStatusAndConfirmedAtIsNotNullOrderByConfirmedAtAsc(ReviewStatus reviewStatus);
 
     Optional<ExtractedDocument> findBySessionId(UUID sessionId);
 }

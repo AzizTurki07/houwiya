@@ -7,7 +7,10 @@ spring:
     password: ${DB_PASSWORD:onboarding}
   jpa:
     hibernate:
-      ddl-auto: update   # fine for a dev/internship project; use migrations (Flyway) if you productionize later
+      # The schema is owned by Flyway (src/main/resources/db/migration); Hibernate only checks
+      # that the entities still match it and fails fast at startup if they don't.
+      ddl-auto: validate
+    open-in-view: true
     show-sql: false
     properties:
       hibernate:
@@ -16,6 +19,8 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+  flyway:
+    enabled: true
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
@@ -43,6 +48,24 @@ app:
   review:
     # Below this OCR confidence, a document can't be auto-approved and goes to the admin queue.
     min-confidence: ${REVIEW_MIN_CONFIDENCE:0.7}
+  crypto:
+    # AES-256 key (base64, 32 bytes) for personal data at rest. The default is a PUBLIC dev key
+    # (it's in this file): set APP_ENCRYPTION_KEY to your own for anything beyond local dev,
+    # e.g. `openssl rand -base64 32`. Changing it makes existing encrypted data unreadable.
+    key: ${APP_ENCRYPTION_KEY:REVWLU9OTFktS0VZLW5ldmVyLXVzZS1mb3ItcmVhbCE=}
+  admin:
+    # Creates (or promotes) this account as ADMIN at startup. Leave empty to skip.
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+  mail:
+    # Off by default: decision e-mails are only logged until SMTP (spring.mail.*) is set up.
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:no-reply@houwiya.local}
+  rate-limit:
+    # Per client IP on /api/auth/login and /api/auth/register.
+    auth-per-minute: ${RATE_LIMIT_AUTH_PER_MINUTE:10}
+    # Per signed-in user on document uploads (each one is an OCR run).
+    uploads-per-hour: ${RATE_LIMIT_UPLOADS_PER_HOUR:30}
 
 springdoc:
   swagger-ui:
