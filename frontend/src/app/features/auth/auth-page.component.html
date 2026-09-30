@@ -1,0 +1,57 @@
+<main class="page auth">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">H</span>
+    <span>Houwiya</span>
+  </div>
+
+  <section class="card">
+    <h1>{{ mode === 'login' ? 'Sign in' : 'Create your account' }}</h1>
+    <p class="muted">
+      {{ mode === 'login'
+        ? 'Continue verifying your identity.'
+        : 'Verify your identity in a few minutes with your passport or national ID card.' }}
+    </p>
+
+    @if (sessionExpired) {
+      <div class="alert warning" role="status">Your session expired. Please sign in again.</div>
+    }
+    @if (error()) {
+      <div class="alert error" role="alert">{{ error() }}</div>
+    }
+
+    <form class="stack" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <div class="field" [class.invalid]="showError('email')">
+        <label for="email">Email</label>
+        <input id="email" type="email" formControlName="email" autocomplete="email" inputmode="email" />
+        @if (showError('email')) {
+          <span class="field-error">Enter a valid email address.</span>
+        }
+      </div>
+
+      <div class="field" [class.invalid]="showError('password')">
+        <label for="password">Password</label>
+        <input
+          id="password"
+          type="password"
+          formControlName="password"
+          [attr.autocomplete]="mode === 'login' ? 'current-password' : 'new-password'"
+        />
+        @if (showError('password')) {
+          <span class="field-error">Password must be at least 8 characters.</span>
+        }
+      </div>
+
+      <button class="btn primary block" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Please wait…' : (mode === 'login' ? 'Sign in' : 'Create account') }}
+      </button>
+    </form>
+  </section>
+
+  <p class="switch muted">
+    @if (mode === 'login') {
+      New here? <a routerLink="/register">Create an account</a>
+    } @else {
+      Already have an account? <a routerLink="/login">Sign in</a>
+    }
+  </p>
+</main>

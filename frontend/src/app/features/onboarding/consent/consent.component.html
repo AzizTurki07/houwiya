@@ -1,0 +1,39 @@
+<main class="page">
+  <app-steps [current]="1" />
+
+  @if (loading()) {
+    <p class="muted" aria-live="polite">Loading…</p>
+  } @else if (loadError()) {
+    <div class="alert error" role="alert">{{ loadError() }}</div>
+    <a class="btn" routerLink="/">Back to my verifications</a>
+  } @else {
+    @if (error()) {
+      <div class="alert error" role="alert">{{ error() }}</div>
+    }
+    <section class="card">
+      <h1>Before we start</h1>
+      <p>To verify your identity we need a photo of one identity document:</p>
+      <ul>
+        <li>your <strong>passport</strong> (the photo page), or</li>
+        <li>your <strong>Tunisian national ID card</strong> (CIN, front side).</li>
+      </ul>
+      <p>
+        We read your name, date of birth, document number and (for passports) nationality
+        and expiry date from the photo. You can check and correct them before submitting.
+        These details are only used to verify your identity for this application.
+      </p>
+
+      <label class="row consent-check">
+        <input type="checkbox" [(ngModel)]="agreed" name="agreed" />
+        <span>I agree to have my identity document photographed and its details processed for verification.</span>
+      </label>
+
+      <div class="row end">
+        <a class="btn" routerLink="/">Not now</a>
+        <button class="btn primary" type="button" (click)="accept()" [disabled]="!agreed || submitting()">
+          {{ submitting() ? 'Saving…' : 'Continue' }}
+        </button>
+      </div>
+    </section>
+  }
+</main>

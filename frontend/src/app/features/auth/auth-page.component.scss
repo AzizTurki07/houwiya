@@ -1,0 +1,29 @@
+.auth {
+  max-width: 420px;
+  padding-top: 48px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 24px;
+  justify-content: center;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 1.2rem;
+}
+
+.switch {
+  text-align: center;
+}

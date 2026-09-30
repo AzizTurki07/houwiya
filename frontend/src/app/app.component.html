@@ -1,1 +1,10 @@
+@if (auth.isAuthenticated()) {
+  <header class="topbar">
+    <a class="brand" routerLink="/">
+      <span class="logo" aria-hidden="true">H</span>
+      Houwiya
+    </a>
+    <button class="btn link" type="button" (click)="logout()">Sign out</button>
+  </header>
+}
 <router-outlet />

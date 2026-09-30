@@ -1,0 +1,28 @@
+.hero {
+  padding: 24px;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  margin-bottom: 10px;
+  padding: 16px;
+}
+
+.item:hover {
+  border-color: var(--primary);
+}
+
+.title {
+  font-weight: 600;
+}

@@ -1,0 +1,41 @@
+.meter {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin: 10px 0 8px;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--danger);
+    transition: width 0.4s;
+  }
+}
+
+.confidence[data-level='medium'] .meter span {
+  background: var(--warning);
+}
+
+.confidence[data-level='high'] .meter span {
+  background: var(--success);
+}
+
+.ok {
+  color: var(--success);
+  margin: 0;
+}
+
+.warnings {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--warning);
+}
+
+.retake-hint {
+  margin: 10px 0 0;
+}
+
+input.upper {
+  text-transform: uppercase;
+}

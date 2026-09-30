@@ -46,10 +46,17 @@ docker-compose.yml
     format and date parsing, and responds `422` if no card outline is found.
   - Both pipelines verified against synthetic test fixtures in this sandbox --
     `pytest tests/ -v` passes all 4 tests (2 passport, 2 CIN).
-- Frontend: Angular 18 app scaffolded, `AuthService` + JWT interceptor wired up
-  against the backend. No screens built yet - that starts around Phase 5/6.
-  A full UI/UX mockup (`houwiya-ui-mockup.html`, shared separately) covers the
-  intended screens for reference while building.
+- Frontend: Angular 18, full end-to-end flow (lazy-loaded standalone components):
+  sign in / register -> my verifications -> consent -> choose passport or CIN ->
+  live camera with a document guide (or upload a photo) -> upload progress + "reading
+  your document" state -> **editable review screen** (reading-quality meter, fields
+  highlighted from the backend `warnings`, per-field validation such as 8-digit CIN
+  numbers) -> confirm -> verified / submitted-for-review result. A `422` from the AI
+  service shows a retake prompt with tips; a `502` offers to retry the same photo;
+  an expired JWT signs the user out and returns them to login.
+  The API is called through the relative path `/api`, which `ng serve` proxies to
+  `localhost:8080` (`frontend/proxy.conf.json`), so the same build works locally and
+  behind a Codespaces forwarded URL.
 
 ### Running the AI service tests
 ```bash
@@ -61,6 +68,32 @@ pip install -r requirements.txt
 #   brew install tesseract      (Mac)
 pytest tests/ -v
 ```
+
+## Running in GitHub Codespaces
+
+The repo has a dev container (`.devcontainer/`) with JDK 21 + Maven, Node 20,
+Python 3.12, Tesseract (fra/ara) and Docker-in-Docker; dependencies install on
+creation. Pick a **4-core** machine (Maven + OCR + Angular together need the RAM).
+Then, one terminal each:
+
+```bash
+docker compose up -d postgres ai-service
+```
+```bash
+cd backend && mvn spring-boot:run
+```
+```bash
+cd frontend && npm start
+```
+
+Open the forwarded **port 4200** URL (Ports tab). Only 4200 needs to be reachable:
+the Angular dev server proxies `/api` to the backend inside the Codespace. The
+camera works there because forwarded URLs are HTTPS; you can also open the same URL
+on your phone (set the port to *Public* first, or sign in to GitHub on the phone)
+to test the live capture with a real rear camera.
+
+Backend CORS allows `http://localhost:4200` and `https://*.app.github.dev` by
+default; override with `CORS_ALLOWED_ORIGINS` (comma-separated patterns).
 
 ## Running everything locally
 
@@ -92,8 +125,8 @@ uvicorn app.main:app --reload --port 8000
 **Frontend:**
 ```bash
 cd frontend
-npm install   # already done once in this scaffold, re-run if you re-clone
-npm start     # serves on http://localhost:4200
+npm install
+npm start     # serves on http://localhost:4200, proxies /api -> localhost:8080
 ```
 
 ## Before you write any real code
@@ -141,8 +174,6 @@ repo path:
 
 ## Next steps
 
-- Phase 5 frontend: Angular screens for capture -> upload -> loading -> editable review
-  (driven by `warnings` / `ocrConfidence`) -> confirm, with a retake prompt on `422`.
 - Per-field confidence from the AI service, so the review screen can highlight
   individual fields instead of only the document as a whole.
 - Admin review queue for `NEEDS_REVIEW` documents.

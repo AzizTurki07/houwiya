@@ -1,0 +1,130 @@
+<main class="page">
+  <app-steps [current]="2" />
+
+  @if (!ready()) {
+    @if (error(); as e) {
+      <div class="alert error" role="alert">{{ e.message }}</div>
+      <a class="btn" routerLink="/">Back to my verifications</a>
+    } @else {
+      <p class="muted" aria-live="polite">Loading…</p>
+    }
+  } @else {
+    @switch (mode()) {
+      @case ('choose') {
+        <h1>Which document will you use?</h1>
+
+        <div class="doc-types" role="radiogroup" aria-label="Document type">
+          @for (type of documentTypes; track type) {
+            <button
+              type="button"
+              role="radio"
+              class="card doc-type"
+              [class.selected]="documentType() === type"
+              [attr.aria-checked]="documentType() === type"
+              [attr.aria-label]="labels[type]"
+              (click)="selectType(type)"
+            >
+              <span class="doc-icon" [class.cin]="type === 'CIN'" aria-hidden="true"></span>
+              <strong>{{ labels[type] }}</strong>
+              <span class="muted small">{{ type === 'PASSPORT' ? 'Photo page with the two MRZ lines' : 'Front side of the card' }}</span>
+            </button>
+          }
+        </div>
+
+        @if (documentType(); as type) {
+          <section class="card">
+            <h2>Tips for a good photo</h2>
+            <ul class="tips">
+              @if (type === 'PASSPORT') {
+                <li>Open the passport at the photo page. The two lines of <code>&lt;&lt;&lt;</code> text at the bottom must be fully visible.</li>
+              } @else {
+                <li>Show the whole front of the card with a small margin around it.</li>
+                <li>Lay the card on a plain, dark surface so its edges stand out.</li>
+              }
+              <li>Use good, even light and avoid glare or reflections.</li>
+              <li>Hold the camera straight above the document, not at an angle.</li>
+              <li>Keep fingers off the text.</li>
+            </ul>
+
+            @if (cameraError()) {
+              <div class="alert warning" role="alert">{{ cameraError() }}</div>
+            }
+            @if (error(); as e) {
+              <div class="alert error" role="alert">{{ e.message }}</div>
+            }
+
+            <div class="stack">
+              @if (cameraSupported) {
+                <button class="btn primary block" type="button" (click)="startCamera()">Take a photo</button>
+              }
+              <label class="btn block" [class.primary]="!cameraSupported">
+                Upload a photo
+                <input class="visually-hidden" type="file" accept="image/*" (change)="onFileSelected($event)" />
+              </label>
+            </div>
+          </section>
+        }
+      }
+
+      @case ('camera') {
+        <h1>Line up your {{ documentType() === 'PASSPORT' ? 'passport photo page' : 'ID card' }}</h1>
+        <div class="viewfinder">
+          <video #video autoplay playsinline muted></video>
+          <div class="guide" [class.cin]="documentType() === 'CIN'" aria-hidden="true"></div>
+        </div>
+        <p class="muted small center">Fit the document inside the frame, then take the photo.</p>
+        <div class="row end">
+          <button class="btn" type="button" (click)="cancelCamera()">Cancel</button>
+          <button class="btn primary" type="button" (click)="takePhoto()">Take photo</button>
+        </div>
+      }
+
+      @case ('preview') {
+        <h1>Check your photo</h1>
+        <p class="muted">Make sure all the text is sharp and readable, with no glare.</p>
+
+        @if (error(); as e) {
+          <div class="alert" [class.error]="e.kind !== 'unavailable'" [class.warning]="e.kind === 'unavailable'" role="alert">
+            @if (e.kind === 'unreadable') {
+              <strong>We couldn't read your document</strong>
+              {{ e.message }}
+              <ul>
+                <li>Make sure the whole document is in the photo.</li>
+                <li>Avoid glare and shadows, and hold the camera steady.</li>
+              </ul>
+            } @else {
+              {{ e.message }}
+            }
+          </div>
+        }
+
+        @if (previewUrl(); as url) {
+          <img class="preview" [src]="url" alt="Photo of your document" />
+        }
+
+        <div class="row end">
+          <button class="btn" type="button" (click)="retake()">Retake</button>
+          <button class="btn primary" type="button" (click)="submit()">
+            {{ error()?.kind === 'unavailable' ? 'Try again' : 'Use this photo' }}
+          </button>
+        </div>
+      }
+
+      @case ('uploading') {
+        <section class="card busy" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <h2>Uploading…</h2>
+          <progress max="100" [value]="progress()" aria-label="Upload progress"></progress>
+        </section>
+      }
+
+      @case ('processing') {
+        <section class="card busy" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <h2>Reading your document…</h2>
+          <p class="muted">This usually takes a few seconds.</p>
+        </section>
+      }
+    }
+  }
+</main>

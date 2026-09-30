@@ -1,0 +1,90 @@
+<main class="page">
+  <app-steps [current]="3" />
+
+  @if (document(); as doc) {
+    <h1>Check your details</h1>
+    <p class="muted">
+      We read these from your {{ documentNoun[doc.documentType] }}.
+      Compare each one with your document and correct anything that's wrong.
+    </p>
+
+    <section class="card confidence" [attr.data-level]="confidenceLevel()">
+      <div class="row">
+        <strong>Reading quality</strong>
+        <span class="spacer"></span>
+        <span class="chip"
+              [class.success]="confidenceLevel() === 'high'"
+              [class.warning]="confidenceLevel() === 'medium'"
+              [class.danger]="confidenceLevel() === 'low'">
+          {{ confidenceLevel() === 'high' ? 'Good' : confidenceLevel() === 'medium' ? 'Fair' : 'Poor' }} · {{ confidencePct() }}%
+        </span>
+      </div>
+      <div class="meter" role="meter" aria-label="Reading quality" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="confidencePct()">
+        <span [style.width.%]="confidencePct()"></span>
+      </div>
+      @if (doc.checksumValid === true) {
+        <p class="small ok">✓ Passport check digits verified.</p>
+      }
+      @if (doc.warnings.length) {
+        <ul class="warnings small">
+          @for (w of doc.warnings; track w) {
+            <li>{{ warningText[w] }}</li>
+          }
+        </ul>
+      }
+      @if (confidenceLevel() === 'low') {
+        <p class="small retake-hint">
+          If a lot of this looks wrong, a clearer photo will work better than typing it all in.
+          <a [routerLink]="['/onboarding', sessionId, 'capture']" [queryParams]="{ type: doc.documentType }">Retake the photo</a>
+        </p>
+      }
+    </section>
+
+    <form class="card stack" [formGroup]="form" (ngSubmit)="confirm()" novalidate>
+      @for (spec of specs(); track spec.key) {
+        <div class="field" [class.invalid]="showError(spec.key)" [class.flagged]="!showError(spec.key) && flagFor(spec.key)">
+          <label [for]="'f-' + spec.key">
+            {{ spec.label }}@if (spec.required) {<span aria-hidden="true"> *</span>}
+          </label>
+          @if (spec.type === 'textarea') {
+            <textarea [id]="'f-' + spec.key" [formControlName]="spec.key" rows="2"></textarea>
+          } @else {
+            <input
+              [id]="'f-' + spec.key"
+              [type]="spec.type"
+              [formControlName]="spec.key"
+              [attr.maxlength]="spec.maxLength ?? null"
+              [class.upper]="spec.uppercase"
+              [attr.inputmode]="spec.key === 'document_number' && doc.documentType === 'CIN' ? 'numeric' : null"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          }
+          @if (showError(spec.key)) {
+            <span class="field-error">{{ errorFor(spec) }}</span>
+          } @else if (flagFor(spec.key)) {
+            <span class="field-flag">⚠ {{ flagFor(spec.key) }}</span>
+          } @else if (spec.patternHint) {
+            <span class="field-hint">{{ spec.patternHint }}</span>
+          }
+        </div>
+      }
+
+      @if (submitError()) {
+        <div class="alert error" role="alert">{{ submitError() }}</div>
+      }
+
+      <div class="row end">
+        <a class="btn" [routerLink]="['/onboarding', sessionId, 'capture']" [queryParams]="{ type: doc.documentType }">Retake photo</a>
+        <button class="btn primary" type="submit" [disabled]="submitting()">
+          {{ submitting() ? 'Submitting…' : 'Confirm and submit' }}
+        </button>
+      </div>
+    </form>
+  } @else if (loadError()) {
+    <div class="alert error" role="alert">{{ loadError() }}</div>
+    <a class="btn" routerLink="/">Back to my verifications</a>
+  } @else {
+    <p class="muted" aria-live="polite">Loading…</p>
+  }
+</main>

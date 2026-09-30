@@ -1,0 +1,37 @@
+<main class="page">
+  <section class="card hero">
+    <h1>Verify your identity</h1>
+    <p class="muted">
+      Take a photo of your passport or Tunisian national ID card. We read the details
+      automatically, then you check them before submitting.
+    </p>
+    <button class="btn primary" type="button" (click)="start()" [disabled]="starting()">
+      {{ starting() ? 'Starting…' : 'Start a new verification' }}
+    </button>
+  </section>
+
+  @if (error()) {
+    <div class="alert error" role="alert">{{ error() }}</div>
+  }
+
+  <h2>Your verifications</h2>
+  @if (sessions() === null && !error()) {
+    <p class="muted" aria-live="polite">Loading…</p>
+  } @else if (sessions()?.length === 0) {
+    <p class="muted">You haven't started any verifications yet.</p>
+  } @else {
+    <ul class="list">
+      @for (s of sessions(); track s.id) {
+        <li>
+          <a class="card item" [routerLink]="routeFor(s.id, s.status)">
+            <div>
+              <div class="title">Verification · {{ s.createdAt | date: 'mediumDate' }}</div>
+              <div class="muted small">Last updated {{ s.updatedAt | date: 'short' }}</div>
+            </div>
+            <span class="chip {{ statusLabel[s.status].tone }}">{{ statusLabel[s.status].text }}</span>
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</main>

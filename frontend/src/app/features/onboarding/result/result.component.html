@@ -1,0 +1,41 @@
+<main class="page">
+  <app-steps [current]="4" />
+
+  @if (document(); as doc) {
+    <section class="card result">
+      @switch (doc.sessionStatus) {
+        @case ('APPROVED') {
+          <div class="badge success" aria-hidden="true">✓</div>
+          <h1>You're verified</h1>
+          <p class="muted">Your {{ documentNoun[doc.documentType] }} was checked and your identity is confirmed.</p>
+        }
+        @case ('REJECTED') {
+          <div class="badge danger" aria-hidden="true">✕</div>
+          <h1>Verification unsuccessful</h1>
+          <p class="muted">We couldn't verify your identity with this document. You can start a new verification.</p>
+        }
+        @default {
+          <div class="badge warning" aria-hidden="true">⏳</div>
+          <h1>Submitted for review</h1>
+          <p class="muted">Thanks, we have your details. A member of our team will check them shortly.</p>
+          @if (doc.warnings.length) {
+            <div class="reasons">
+              <p class="small"><strong>Why a manual check is needed:</strong></p>
+              <ul class="small">
+                @for (w of doc.warnings; track w) {
+                  <li>{{ warningText[w] }}</li>
+                }
+              </ul>
+            </div>
+          }
+        }
+      }
+      <a class="btn primary" routerLink="/">Back to my verifications</a>
+    </section>
+  } @else if (error()) {
+    <div class="alert error" role="alert">{{ error() }}</div>
+    <a class="btn" routerLink="/">Back to my verifications</a>
+  } @else {
+    <p class="muted" aria-live="polite">Loading…</p>
+  }
+</main>

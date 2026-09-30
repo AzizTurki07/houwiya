@@ -1,0 +1,110 @@
+.doc-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.doc-type {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  margin: 0;
+  border-width: 2px;
+
+  &.selected {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+  }
+}
+
+/* Simple document glyphs drawn with CSS: passport = portrait booklet, CIN = landscape card. */
+.doc-icon {
+  width: 34px;
+  height: 46px;
+  border: 3px solid currentColor;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  opacity: 0.75;
+
+  &.cin {
+    width: 50px;
+    height: 32px;
+  }
+}
+
+.tips {
+  padding-left: 20px;
+  margin: 0 0 16px;
+}
+
+.viewfinder {
+  position: relative;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 12px;
+
+  video {
+    display: block;
+    width: 100%;
+    max-height: 70vh;
+    object-fit: cover;
+  }
+}
+
+/* Aspect ratios: passport photo page 125x88mm, ID-1 card 85.6x54mm. */
+.guide {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 86%;
+  height: auto;
+  max-height: 86%;
+  aspect-ratio: 1.42;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35);
+
+  &.cin {
+    aspect-ratio: 1.586;
+  }
+}
+
+.center {
+  text-align: center;
+}
+
+.preview {
+  display: block;
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  margin-bottom: 16px;
+}
+
+.busy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  text-align: center;
+
+  progress {
+    width: 100%;
+    max-width: 280px;
+    accent-color: var(--primary);
+  }
+}
+
+label.btn {
+  position: relative;
+}
