@@ -3,6 +3,7 @@ import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { DocumentResponse, DocumentSide, DocumentType } from '../../../core/models/onboarding.model';
+import { NativeCameraService } from '../../../core/services/native-camera.service';
 import { OnboardingService } from '../../../core/services/onboarding.service';
 import { errorMessage } from '../../../core/utils/http-error';
 import { canvasToJpeg, prepareForUpload } from '../../../core/utils/image';
@@ -48,6 +49,9 @@ export class CaptureComponent implements OnInit, OnDestroy {
   readonly error = signal<UploadError | null>(null);
   readonly cameraError = signal<string | null>(null);
   readonly cameraSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  private readonly nativeCamera = inject(NativeCameraService);
+  /** Running as the Capacitor app: use the phone's camera/gallery instead of the web viewfinder. */
+  readonly native = this.nativeCamera.isNative;
 
   ngOnInit(): void {
     const preselected = this.side === 'BACK' ? 'CIN' : this.route.snapshot.queryParamMap.get('type');
@@ -81,6 +85,19 @@ export class CaptureComponent implements OnInit, OnDestroy {
   selectType(type: DocumentType): void {
     this.documentType.set(type);
     this.error.set(null);
+  }
+
+  async takeNative(source: 'camera' | 'gallery'): Promise<void> {
+    this.cameraError.set(null);
+    this.error.set(null);
+    try {
+      const photo = await this.nativeCamera.take(source);
+      if (photo) {
+        this.setImage(photo);
+      }
+    } catch (err) {
+      this.cameraError.set(err instanceof Error ? err.message : "Couldn't open the camera.");
+    }
   }
 
   async startCamera(): Promise<void> {

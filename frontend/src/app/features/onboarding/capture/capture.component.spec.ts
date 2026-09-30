@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed, fakeAsync, flush } from '@angular/core/testi
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { NativeCameraService } from '../../../core/services/native-camera.service';
 import { CaptureComponent } from './capture.component';
 
 const SESSION = 's-1';
@@ -14,13 +15,14 @@ describe('CaptureComponent', () => {
   let httpMock: HttpTestingController;
   let router: Router;
 
-  function setup(queryParams: Record<string, string> = {}, data: Record<string, string> = {}): void {
+  function setup(queryParams: Record<string, string> = {}, data: Record<string, string> = {}, nativeCamera?: object): void {
     TestBed.configureTestingModule({
       imports: [CaptureComponent],
       providers: [
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
+        ...(nativeCamera ? [{ provide: NativeCameraService, useValue: nativeCamera }] : []),
         {
           provide: ActivatedRoute,
           useValue: {
@@ -175,4 +177,40 @@ describe('CaptureComponent', () => {
     expect(component.image()).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Try again');
   }));
+
+  describe('in the mobile app', () => {
+    const photo = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
+
+    it("uses the phone's camera and gallery instead of the web viewfinder", async () => {
+      const camera = { isNative: true, take: jasmine.createSpy('take').and.resolveTo(photo) };
+      setup({ type: 'CIN' }, {}, camera);
+      sessionLoaded();
+
+      const labels = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLElement>).map((b) => b.textContent!.trim());
+      expect(labels).toContain('Take a photo');
+      expect(labels).toContain('Choose from gallery');
+      expect(fixture.nativeElement.querySelector('input[type=file]')).toBeNull();
+
+      await component.takeNative('gallery');
+      expect(camera.take).toHaveBeenCalledWith('gallery');
+      expect(component.mode()).toBe('preview');
+      expect(component.image()).toBe(photo);
+    });
+
+    it('stays put when the user backs out of the camera', async () => {
+      setup({ type: 'CIN' }, {}, { isNative: true, take: () => Promise.resolve(null) });
+      sessionLoaded();
+      await component.takeNative('camera');
+      expect(component.mode()).toBe('choose');
+      expect(component.cameraError()).toBeNull();
+    });
+
+    it('explains a refused camera permission', async () => {
+      setup({ type: 'CIN' }, {}, { isNative: true, take: () => Promise.reject(new Error('Camera access was refused. Allow it in your phone settings.')) });
+      sessionLoaded();
+      await component.takeNative('camera');
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Camera access was refused');
+    });
+  });
 });

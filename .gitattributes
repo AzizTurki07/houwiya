@@ -1,2 +1,4 @@
 # Shell scripts run inside Linux containers (Codespaces, CI) -- never check them out with CRLF.
 *.sh text eol=lf
+# The Gradle wrapper runs on Linux CI/Codespaces: keep LF line endings.
+frontend/android/gradlew text eol=lf

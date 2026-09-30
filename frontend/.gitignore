@@ -40,3 +40,6 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+
+# Generated at mobile build time from MOBILE_API_URL (scripts/mobile-env.mjs)
+/src/environments/environment.mobile.ts

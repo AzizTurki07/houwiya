@@ -9,10 +9,11 @@ an AI/OCR microservice. See the project roadmap for the full phase-by-phase plan
 backend/       Spring Boot API (auth, onboarding sessions, persistence)
 ai-service/    Python FastAPI microservice (passport MRZ + Tunisian CIN OCR)
 frontend/      Angular app (capture UI, review screen, admin dashboard)
+frontend/android/  Capacitor Android project wrapping the same app (native camera)
 docker-compose.yml
 ```
 
-## Current status (Phases 2-5 + data protection; Phase 4 accuracy work ongoing)
+## Current status (Phases 2-6 + data protection; Phase 4 accuracy work ongoing)
 
 - Backend: entities (`User`, `OnboardingSession`, `ExtractedDocument`), JWT auth
   (`/api/auth/register`, `/api/auth/login`), and the full onboarding flow wired to the
@@ -81,6 +82,42 @@ OCR results depend on the exact Tesseract build, so tests run inside the service
 docker build -t houwiya-ai ai-service
 docker run --rm houwiya-ai python -m pytest tests/ -v
 ```
+
+## Mobile app (Android)
+
+The Angular app is wrapped with Capacitor 7 (`frontend/capacitor.config.ts`,
+`frontend/android/`). Same screens and flow as the web app; the capture step uses the
+phone's own camera and gallery (`@capacitor/camera`) instead of the browser viewfinder,
+with photos capped at 2560 px on the long edge and EXIF rotation applied.
+
+**Download a build:** every push touching `frontend/` runs the *Mobile CI* workflow, which
+attaches an installable `app-debug.apk` to the run (Actions -> run -> Artifacts).
+
+**Which backend it talks to.** A native app has no dev-server proxy, so the API URL is
+compiled in from `MOBILE_API_URL` (default `http://10.0.2.2:8080/api`, the host PC as seen
+from the Android emulator):
+
+| Where the backend runs | `MOBILE_API_URL` |
+|---|---|
+| Your PC, app in the Android emulator | default (`http://10.0.2.2:8080/api`) |
+| Your PC, app on a real phone on the same Wi-Fi | `http://<your PC's LAN IP>:8080/api` |
+| A Codespace (set port 8080 to **Public** in the Ports tab) | `https://<codespace>-8080.app.github.dev/api` |
+
+For CI builds, set it as the repository variable `MOBILE_API_URL`. Plain-HTTP URLs enable
+cleartext traffic in the app (development only); an `https://` backend needs no exception.
+The backend's default CORS origins include the app's WebView origins (`https://localhost`
+on Android, `capacitor://localhost` on iOS).
+
+**Build locally** (needs the Android SDK and **JDK 21**, e.g. from Android Studio):
+
+```bash
+cd frontend
+MOBILE_API_URL=http://10.0.2.2:8080/api npm run build:mobile
+cd android && ./gradlew assembleDebug    # -> app/build/outputs/apk/debug/app-debug.apk
+```
+
+or `npx cap open android` to run it from Android Studio. Codespaces don't include the
+Android SDK: use the CI artifact there. iOS would need a Mac (`npx cap add ios`).
 
 ## Admin review queue
 
@@ -239,5 +276,5 @@ first CI run of the AI workflow builds the image from scratch (a few minutes).
 - Reduce "confident but wrong" reads, mostly on first names: e.g. cross-check the CIN
   number against the back's barcode, or try PaddleOCR for dates only (it read 8/8).
 - Selfie face match + liveness against the document photo.
-- Mobile app (Capacitor, Phase 6).
+- Release signing for the Android app (the CI builds a debug APK) and an iOS build.
 - Key rotation for `APP_ENCRYPTION_KEY` (the `v1:` prefix on stored values leaves room).
