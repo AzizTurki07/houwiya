@@ -281,38 +281,42 @@ npm start     # serves on http://localhost:4200, proxies /api -> localhost:8080
 
 ## Continuous Integration
 
-Three independent GitHub Actions workflows live in `.github/workflows/`, one
-per service, each only triggering when that service's folder changes:
+Badges for this repository:
+
+![Backend CI](https://github.com/AzizTurki07/houwiya/actions/workflows/backend-ci.yml/badge.svg)
+![AI Service CI](https://github.com/AzizTurki07/houwiya/actions/workflows/ai-service-ci.yml/badge.svg)
+![Frontend CI](https://github.com/AzizTurki07/houwiya/actions/workflows/frontend-ci.yml/badge.svg)
+![Mobile CI](https://github.com/AzizTurki07/houwiya/actions/workflows/mobile-ci.yml/badge.svg)
+![End-to-end](https://github.com/AzizTurki07/houwiya/actions/workflows/e2e.yml/badge.svg)
+
+The workflows live in `.github/workflows/`. Each one runs when its folders change, and can
+also be started by hand: **Actions -> pick the workflow -> Run workflow**.
 
 | Workflow | What it does |
 |---|---|
-| `backend-ci.yml` | JDK 21 + Maven, runs `mvn test` against an in-memory H2 database (no Postgres needed in CI), then builds the jar |
-| `ai-service-ci.yml` | Builds the production AI service image (Tesseract + fra/ara, layer-cached) and runs `pytest` inside it, so CI tests exactly what ships |
-| `frontend-ci.yml` | `npm ci`, `ng build`, then runs the Karma unit tests headless (`ubuntu-latest` runners ship Chrome pre-installed, which `karma-chrome-launcher` picks up automatically) |
+| `backend-ci.yml` | JDK 21 + Maven, `mvn test` against in-memory H2 + Flyway (AI service mocked), then builds the jar |
+| `ai-service-ci.yml` | Builds the production AI image (Tesseract fra/ara + face models, layer-cached) and runs `pytest` inside it, so CI tests exactly what ships |
+| `frontend-ci.yml` | `npm ci`, `ng build`, Karma unit tests in headless Chrome |
+| `mobile-ci.yml` | Builds the Android app; the debug APK is attached to the run (**Artifacts -> houwiya-debug-apk**) |
+| `e2e.yml` | Starts the real stack from `docker-compose.yml` (Postgres + AI service + backend images) and walks the whole flow through the API: passport upload, selfie, confirm, duplicate check, face mismatch, admin review and approval. The step-by-step table appears on the run's **Summary** page; service logs are attached if it fails |
 
-**To get this running:**
+The end-to-end run uses only synthetic passports and public-domain sample faces
+(`e2e/make_fixtures.py`). A still photo can't pass the head-turn liveness check, so it
+covers match / mismatch / liveness-failed; liveness *passing* is covered by the AI unit tests
+and `FaceMatchTest`. To run it on your machine against a fresh database:
+
 ```bash
-cd id-onboarding-platform
-git init
-git add .
-git commit -m "Initial scaffold: backend, ai-service, frontend, CI"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-Once pushed, check the **Actions** tab on GitHub — all three workflows should
-run automatically. Add badges to the top of this README once you know your
-repo path:
-```md
-![Backend CI](https://github.com/<your-username>/<your-repo>/actions/workflows/backend-ci.yml/badge.svg)
-![AI Service CI](https://github.com/<your-username>/<your-repo>/actions/workflows/ai-service-ci.yml/badge.svg)
-![Frontend CI](https://github.com/<your-username>/<your-repo>/actions/workflows/frontend-ci.yml/badge.svg)
+docker compose up -d --build
+docker run --rm -v "$PWD/e2e:/e2e" houwiya-ai-service:local python /e2e/make_fixtures.py /e2e/out
+ADMIN_EMAIL=... ADMIN_PASSWORD=... python3 e2e/run_e2e.py --api http://localhost:8080/api
 ```
 
-**Verified locally:** backend `mvn test` (41 tests, H2 + Flyway), frontend build + Karma headless
-(53 tests), and the AI service tests run inside the freshly built image exactly as the
-workflow does (39 tests). The Buildx layer cache (`type=gha`) only exists on GitHub, so the
-first CI run of the AI workflow builds the image from scratch (a few minutes).
+(The backend must have been started with the same `ADMIN_EMAIL`/`ADMIN_PASSWORD`. Run it
+against a fresh database: the synthetic passport can only be used once.)
+
+All jobs use pinned `ubuntu-24.04` runners, read-only repository permissions, and cancel a
+run when a newer push supersedes it. Dependabot opens one grouped PR a month when the
+actions used have new versions. Both images run as a non-root user.
 
 ## Next steps
 

@@ -1,0 +1,90 @@
+name: End-to-end
+
+# Starts the real stack (Postgres + AI service + backend, via docker-compose.yml) and walks
+# the whole flow through the API: passport upload -> selfie -> confirm -> admin review.
+# Synthetic passports and public-domain sample faces only (e2e/make_fixtures.py).
+# The step-by-step result is shown on the run's summary page.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ai-service/**'
+      - 'backend/**'
+      - 'e2e/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    paths:
+      - 'ai-service/**'
+      - 'backend/**'
+      - 'e2e/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Throwaway account on a throwaway database: not a secret.
+      ADMIN_EMAIL: e2e-admin@example.com
+      ADMIN_PASSWORD: e2e-admin-password-ci
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Built once with layer caching (the AI image shares its cache with AI Service CI),
+      # under the names docker-compose.yml uses, so compose starts them with --no-build.
+      - name: Build AI service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ai-service
+          tags: houwiya-ai-service:local
+          load: true
+          cache-from: type=gha,scope=ai-service
+          cache-to: type=gha,scope=ai-service,mode=max
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          tags: houwiya-backend:local
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Start the stack
+        run: docker compose up -d --no-build
+
+      - name: Generate synthetic fixtures
+        run: |
+          mkdir -p e2e/out && chmod 777 e2e/out
+          docker run --rm -v "$PWD/e2e:/e2e" houwiya-ai-service:local python /e2e/make_fixtures.py /e2e/out
+
+      - name: Run the end-to-end flow
+        run: python3 e2e/run_e2e.py --api http://localhost:8080/api --fixtures e2e/out --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color > e2e-logs.txt
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-logs
+          path: e2e-logs.txt
+          retention-days: 7
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v

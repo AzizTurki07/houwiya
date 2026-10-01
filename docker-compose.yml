@@ -17,6 +17,8 @@ services:
 
   ai-service:
     build: ./ai-service
+    # Named so CI can build the images once (with layer caching) and start them with --no-build.
+    image: houwiya-ai-service:local
     ports:
       - "8000:8000"
     # Reload the FastAPI service on code changes during local dev.
@@ -26,6 +28,7 @@ services:
 
   backend:
     build: ./backend
+    image: houwiya-backend:local
     network_mode: host
     environment:
       DB_HOST: localhost
