@@ -1,7 +1,39 @@
-# ID/Passport Onboarding Platform
+# Houwiya — ID/Passport Onboarding Platform
 
 Scans Tunisian CIN and passport documents during onboarding and extracts data via
-an AI/OCR microservice. See the project roadmap for the full phase-by-phase plan.
+an AI/OCR microservice, then matches a selfie against the document photo. See the
+project roadmap for the full phase-by-phase plan.
+
+## Screenshots
+
+All data shown is synthetic: a generated passport for a fictional applicant, and NASA's
+public-domain portrait of astronaut Eileen Collins as the face. No real document appears.
+
+**Applicant (mobile)**
+
+<p>
+  <img src="docs/screenshots/02-choix-document.png" width="24%" alt="Choosing the document type">
+  <img src="docs/screenshots/04-verification-champs.png" width="24%" alt="Checking the fields read from the passport">
+  <img src="docs/screenshots/03-selfie.png" width="24%" alt="Selfie step with head-turn instructions">
+  <img src="docs/screenshots/01-mes-verifications.png" width="24%" alt="List of the applicant's verifications">
+</p>
+
+1. Choose the document · 2. Check the fields read automatically (confidence, MRZ check
+digits) · 3. Selfie with head-turn liveness check · 4. Your verifications and their status
+
+**Reviewer (admin)**
+
+<p>
+  <img src="docs/screenshots/06-revue-admin-detail.png" width="49%" alt="Review page: document, selfie, face score and decision">
+  <img src="docs/screenshots/05-file-de-revue-admin.png" width="49%" alt="Review queue">
+</p>
+
+Cases that can't be approved automatically: the document photo next to the selfie, the face
+score against the threshold, the liveness result, and approve / reject with a reason.
+
+**Continuous integration**
+
+<img src="docs/screenshots/07-github-actions.png" width="70%" alt="GitHub Actions: all workflows passing">
 
 ## Layout
 
