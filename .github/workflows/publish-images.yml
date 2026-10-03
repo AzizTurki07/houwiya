@@ -3,7 +3,7 @@ name: Publish images
 # CD: builds the three images and publishes them to GitHub Container Registry on every push
 # to main, tagged "latest" and with the commit (sha-xxxxxxx). Deploy them to a cluster with
 #   kubectl apply -k k8s/overlays/ghcr
-# The packages start private; see k8s/overlays/ghcr/kustomization.yaml to make them public.
+# The packages follow the repository's visibility (public here: pulling needs no login).
 on:
   push:
     branches: [main]

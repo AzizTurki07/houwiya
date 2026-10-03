@@ -342,8 +342,8 @@ The last one deletes the AI pod; watch Kubernetes start a new one with
 The manifests are in `k8s/base` with two variants:
 - `k8s/overlays/local` uses images built in your workspace (what `up.sh` uses);
 - `k8s/overlays/ghcr` uses the images published by the **Publish images** workflow:
-  `kubectl apply -k k8s/overlays/ghcr`. Make the `houwiya-*` packages public first
-  (GitHub profile -> Packages -> package settings).
+  `kubectl apply -k k8s/overlays/ghcr`. The packages are public (they follow the
+  repository's visibility), so no login is needed to pull them.
 
 The secrets in `k8s/base/kustomization.yaml` are **development values** for a local cluster
 with synthetic data. Replace them before handling real documents.

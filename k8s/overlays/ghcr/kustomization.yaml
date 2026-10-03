@@ -1,6 +1,6 @@
 # Images published to GitHub Container Registry by .github/workflows/publish-images.yml.
-# The packages start private: make them public once (GitHub -> your profile -> Packages ->
-# each houwiya-* package -> Package settings -> Change visibility), or add an imagePullSecret.
+# They follow the repository's visibility: public here, so pulling needs no credentials.
+# (For a private repository, add an imagePullSecret for ghcr.io.)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
