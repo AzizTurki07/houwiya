@@ -1,0 +1,42 @@
+# Houwiya on Kubernetes: Postgres + AI service + backend + frontend (nginx, also proxies /api).
+# Deploy an overlay, not this directory:
+#   kubectl apply -k k8s/overlays/local   # images built in this workspace (k8s/up.sh)
+#   kubectl apply -k k8s/overlays/ghcr    # images published by the "Publish images" workflow
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: houwiya
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - ai-service.yaml
+  - backend.yaml
+  - frontend.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: houwiya
+    includeSelectors: false
+
+configMapGenerator:
+  - name: backend-config
+    literals:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=onboarding
+      - AI_SERVICE_URL=http://ai-service:8000
+      # Requests arrive through the frontend's nginx: trust its X-Forwarded-For, so the
+      # per-IP login rate limit sees each client, not the proxy.
+      - SERVER_FORWARD_HEADERS_STRATEGY=native
+
+# DEVELOPMENT VALUES ONLY -- for a local/CI cluster with synthetic data. The encryption key
+# is the public dev key from application.yml. Replace all of these before real documents.
+secretGenerator:
+  - name: houwiya-secrets
+    literals:
+      - DB_USER=onboarding
+      - DB_PASSWORD=onboarding-dev-only
+      - JWT_SECRET=dev-only-jwt-secret-for-the-local-kubernetes-cluster
+      - APP_ENCRYPTION_KEY=REVWLU9OTFktS0VZLW5ldmVyLXVzZS1mb3ItcmVhbCE=
+      - ADMIN_EMAIL=admin@houwiya.local
+      - ADMIN_PASSWORD=admin-dev-password

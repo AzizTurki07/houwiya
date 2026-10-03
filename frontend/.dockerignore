@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.angular/
+android/
+coverage/
+src/environments/environment.mobile.ts

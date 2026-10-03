@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +17,9 @@ import org.springframework.stereotype.Component;
  * Registration only ever creates USER accounts, so the first admin comes from configuration:
  * ADMIN_EMAIL + ADMIN_PASSWORD create that account (or promote an existing one) at startup.
  * The password is only used when the account is created -- it never overwrites a changed one.
+ *
+ * Several instances can start at once (e.g. Kubernetes replicas): if another one creates the
+ * account first, the unique e-mail constraint rejects ours, and that's fine -- it exists.
  */
 @Slf4j
 @Component
@@ -53,11 +57,17 @@ public class AdminBootstrap implements ApplicationRunner {
             if (password.length() < 12) {
                 throw new IllegalStateException("ADMIN_PASSWORD must be at least 12 characters to create the admin account");
             }
-            User admin = userRepository.save(User.builder()
-                    .email(email)
-                    .passwordHash(passwordEncoder.encode(password))
-                    .role(Role.ADMIN)
-                    .build());
+            User admin;
+            try {
+                admin = userRepository.save(User.builder()
+                        .email(email)
+                        .passwordHash(passwordEncoder.encode(password))
+                        .role(Role.ADMIN)
+                        .build());
+            } catch (DataIntegrityViolationException createdConcurrently) {
+                log.info("Admin account {} was created by another instance", email);
+                return;
+            }
             log.info("Created admin account {}", email);
             auditService.recordAs("system", AuditAction.ADMIN_ACCOUNT_BOOTSTRAPPED, "USER", admin.getId(), "created");
         });

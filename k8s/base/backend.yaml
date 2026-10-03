@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # Flyway runs at startup and needs the database: wait for it instead of crash-looping.
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done"]
+      containers:
+        - name: backend
+          image: houwiya-backend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: DB_USER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: DB_PASSWORD }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: JWT_SECRET }
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: APP_ENCRYPTION_KEY }
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: ADMIN_EMAIL }
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: houwiya-secrets, key: ADMIN_PASSWORD }
+          # Keep serving for a few seconds after being told to stop, until every node has
+          # removed this pod from the Service -- otherwise a redeploy causes brief 502s.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+          # No actuator: Tomcat only opens the port once the app (and Flyway) has started.
+          startupProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 1Gi }

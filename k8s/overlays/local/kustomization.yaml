@@ -1,0 +1,12 @@
+# Images built in this workspace and loaded into the kind cluster by k8s/up.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: houwiya-backend
+    newTag: local
+  - name: houwiya-ai-service
+    newTag: local
+  - name: houwiya-frontend
+    newTag: local

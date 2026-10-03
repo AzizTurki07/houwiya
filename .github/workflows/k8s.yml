@@ -1,0 +1,126 @@
+name: Kubernetes
+
+# Deploys the app to a throwaway Kubernetes cluster (kind) on the runner -- the same
+# manifests and script as in Codespaces (k8s/up.sh) -- then runs the end-to-end flow against
+# the pods, through the frontend's nginx. The run's Summary page shows the pods and the steps.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - 'backend/**'
+      - 'ai-service/**'
+      - 'frontend/**'
+      - 'e2e/**'
+      - '.github/workflows/k8s.yml'
+  pull_request:
+    paths:
+      - 'k8s/**'
+      - 'backend/**'
+      - 'ai-service/**'
+      - 'frontend/**'
+      - 'e2e/**'
+      - '.github/workflows/k8s.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      # The development admin account from k8s/base/kustomization.yaml.
+      ADMIN_EMAIL: admin@houwiya.local
+      ADMIN_PASSWORD: admin-dev-password
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Layer caches are shared with the other workflows (same scopes).
+      - name: Build AI service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ai-service
+          tags: houwiya-ai-service:local
+          load: true
+          cache-from: type=gha,scope=ai-service
+          cache-to: type=gha,scope=ai-service,mode=max
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          tags: houwiya-backend:local
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          tags: houwiya-frontend:local
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Install kind and kubectl
+        uses: helm/kind-action@v1.15.0
+        with:
+          install_only: true
+
+      - name: Create the cluster and deploy
+        run: bash k8s/up.sh --no-build --no-port-forward
+
+      - name: Forward the frontend to localhost:8080
+        run: |
+          kubectl -n houwiya port-forward svc/frontend 8080:80 > port-forward.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/ > /dev/null && exit 0
+            sleep 2
+          done
+          cat port-forward.log
+          exit 1
+
+      - name: Generate synthetic fixtures
+        run: |
+          mkdir -p e2e/out && chmod 777 e2e/out
+          docker run --rm -v "$PWD/e2e:/e2e" houwiya-ai-service:local python /e2e/make_fixtures.py /e2e/out
+
+      - name: Run the end-to-end flow against the pods
+        run: python3 e2e/run_e2e.py --api http://localhost:8080/api --fixtures e2e/out --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Pods
+        if: always()
+        run: |
+          {
+            echo "### Pods"
+            echo '```'
+            kubectl -n houwiya get pods,services -o wide
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          mkdir -p k8s-diagnostics
+          kubectl -n houwiya get events --sort-by=.lastTimestamp > k8s-diagnostics/events.txt || true
+          kubectl -n houwiya describe pods > k8s-diagnostics/pods.txt || true
+          for pod in $(kubectl -n houwiya get pods -o name); do
+            kubectl -n houwiya logs "$pod" --all-containers --tail=500 > "k8s-diagnostics/$(basename "$pod").log" 2>&1 || true
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: k8s-diagnostics
+          path: k8s-diagnostics/
+          retention-days: 7

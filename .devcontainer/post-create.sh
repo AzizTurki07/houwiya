@@ -29,4 +29,8 @@ Ready. Typical dev loop (one terminal each):
   docker compose up -d postgres ai-service      # db + AI service in Docker
   cd backend && mvn spring-boot:run             # API on :8080
   cd frontend && npm start                      # UI on :4200 (open the forwarded 4200 URL)
+
+Or everything as pods on a local Kubernetes cluster (kind):
+  bash k8s/up.sh                                # builds, deploys, forwards the UI to :4200
+  kubectl -n houwiya get pods                   # see them; k8s/down.sh removes the cluster
 EOF

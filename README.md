@@ -42,6 +42,8 @@ backend/       Spring Boot API (auth, onboarding sessions, persistence)
 ai-service/    Python FastAPI microservice (passport MRZ + Tunisian CIN OCR)
 frontend/      Angular app (capture UI, review screen, admin dashboard)
 frontend/android/  Capacitor Android project wrapping the same app (native camera)
+k8s/           Kubernetes manifests (Kustomize) + kind scripts to run everything as pods
+e2e/           End-to-end check through the public API (synthetic data)
 docker-compose.yml
 ```
 
@@ -303,6 +305,49 @@ npm install
 npm start     # serves on http://localhost:4200, proxies /api -> localhost:8080
 ```
 
+## Kubernetes
+
+Everything can run as pods on a local Kubernetes cluster made with
+[kind](https://kind.sigs.k8s.io) ("Kubernetes in Docker"). The Codespace has kind and
+`kubectl` installed. Plan on about 4 GB of free memory.
+
+```bash
+bash k8s/up.sh
+```
+
+This creates the cluster (once), builds the three images, deploys them, waits for the
+pods and forwards the app to port **4200** (Codespaces: **Ports** tab). The first run takes
+several minutes; re-run it after changing code to redeploy. Admin account:
+`admin@houwiya.local` / `admin-dev-password`.
+
+| Pod | What it is |
+|---|---|
+| `postgres-0` | StatefulSet with a 1 Gi volume |
+| `ai-service-…` | OCR + face match, health-checked on `/health` |
+| `backend-…` | Spring Boot API; waits for Postgres (init container) before starting |
+| `frontend-…` | nginx serving the Angular app and proxying `/api` to the backend |
+
+Things to try:
+
+```bash
+kubectl -n houwiya get pods -o wide
+kubectl -n houwiya logs deploy/backend -f
+kubectl -n houwiya scale deploy/frontend --replicas=3
+kubectl -n houwiya delete pod -l app=ai-service
+```
+
+The last one deletes the AI pod; watch Kubernetes start a new one with
+`kubectl -n houwiya get pods -w`. `bash k8s/down.sh` deletes the cluster and its data.
+
+The manifests are in `k8s/base` with two variants:
+- `k8s/overlays/local` uses images built in your workspace (what `up.sh` uses);
+- `k8s/overlays/ghcr` uses the images published by the **Publish images** workflow:
+  `kubectl apply -k k8s/overlays/ghcr`. Make the `houwiya-*` packages public first
+  (GitHub profile -> Packages -> package settings).
+
+The secrets in `k8s/base/kustomization.yaml` are **development values** for a local cluster
+with synthetic data. Replace them before handling real documents.
+
 ## Before you write any real code
 
 1. Set a real `JWT_SECRET` (don't commit it - use an env var or `.env` file).
@@ -320,6 +365,8 @@ Badges for this repository:
 ![Frontend CI](https://github.com/AzizTurki07/houwiya/actions/workflows/frontend-ci.yml/badge.svg)
 ![Mobile CI](https://github.com/AzizTurki07/houwiya/actions/workflows/mobile-ci.yml/badge.svg)
 ![End-to-end](https://github.com/AzizTurki07/houwiya/actions/workflows/e2e.yml/badge.svg)
+![Kubernetes](https://github.com/AzizTurki07/houwiya/actions/workflows/k8s.yml/badge.svg)
+![Publish images](https://github.com/AzizTurki07/houwiya/actions/workflows/publish-images.yml/badge.svg)
 
 The workflows live in `.github/workflows/`. Each one runs when its folders change, and can
 also be started by hand: **Actions -> pick the workflow -> Run workflow**.
@@ -330,6 +377,8 @@ also be started by hand: **Actions -> pick the workflow -> Run workflow**.
 | `ai-service-ci.yml` | Builds the production AI image (Tesseract fra/ara + face models, layer-cached) and runs `pytest` inside it, so CI tests exactly what ships |
 | `frontend-ci.yml` | `npm ci`, `ng build`, Karma unit tests in headless Chrome |
 | `mobile-ci.yml` | Builds the Android app; the debug APK is attached to the run (**Artifacts -> houwiya-debug-apk**) |
+| `k8s.yml` | Deploys the app to a throwaway Kubernetes cluster (kind) with the same manifests and script as Codespaces, then runs the end-to-end flow against the pods through the frontend's nginx. The **Summary** shows the pods and each step; pod logs and events are attached if it fails |
+| `publish-images.yml` | **CD:** builds the backend, AI service and frontend images and publishes them to GitHub Container Registry (`ghcr.io/azizturki07/houwiya-*`, tags `latest` and `sha-…`) on every push to `main` |
 | `e2e.yml` | Starts the real stack from `docker-compose.yml` (Postgres + AI service + backend images) and walks the whole flow through the API: passport upload, selfie, confirm, duplicate check, face mismatch, admin review and approval. The step-by-step table appears on the run's **Summary** page; service logs are attached if it fails |
 
 The end-to-end run uses only synthetic passports and public-domain sample faces
